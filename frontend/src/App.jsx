@@ -4,6 +4,7 @@ import { api } from "./api";
 
 const tabs = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "catalog", label: "Service Catalog" },
   { id: "servers", label: "Servers" },
   { id: "create", label: "Create VM" },
   { id: "images", label: "Images" },
@@ -19,6 +20,15 @@ const emptyCreateForm = {
   network_id: "",
   key_name: "",
   security_group_id: "",
+  cpu: "",
+  ram_gb: "",
+  disk_gb: "",
+  environment: "dev",
+  app_tag: "",
+  cost_center: "",
+  lifetime_days: "30",
+  packages: "",
+  public_ip_required: false,
 };
 
 function useOpenStackData() {
@@ -29,6 +39,7 @@ function useOpenStackData() {
     flavors: [],
     networks: [],
     floatingIps: [],
+    catalogServices: [],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -44,6 +55,7 @@ function useOpenStackData() {
       ["flavors", api.listFlavors()],
       ["networks", api.listNetworks()],
       ["floatingIps", api.listFloatingIps()],
+      ["catalogServices", api.listCatalogServices()],
     ];
 
     const results = await Promise.allSettled(requests.map(([, request]) => request));
@@ -54,6 +66,7 @@ function useOpenStackData() {
       flavors: [],
       networks: [],
       floatingIps: [],
+      catalogServices: [],
     };
     const errors = [];
 
@@ -85,6 +98,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [notice, setNotice] = useState("");
   const [toasts, setToasts] = useState([]);
+  const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
   const { data, loading, error, setError, refresh } = useOpenStackData();
 
   function showToast(message, type = "success") {
@@ -152,6 +166,17 @@ export default function App() {
         {notice && <div className="alert success">{notice}</div>}
 
         {activeTab === "dashboard" && <Dashboard data={data} loading={loading} />}
+        {activeTab === "catalog" && (
+          <ServiceCatalog
+            loading={loading}
+            onRequest={(service) => {
+              setRequestDefaults(buildCatalogRequestDefaults(service));
+              setActiveTab("create");
+              showToast(`${service.name} loaded into request form`, "success");
+            }}
+            services={data.catalogServices}
+          />
+        )}
         {activeTab === "servers" && (
           <ServersList loading={loading} servers={data.servers} onAction={runAction} />
         )}
@@ -159,11 +184,12 @@ export default function App() {
           <CreateVmForm
             flavors={data.flavors}
             images={data.images}
+            initialValues={requestDefaults}
             networks={data.networks}
             onCreated={async () => {
-              setNotice("Server creation requested");
+              setNotice("VM request submitted");
+              showToast("VM request submitted", "success");
               await refresh();
-              setActiveTab("servers");
             }}
             onError={setError}
           />
@@ -187,6 +213,60 @@ export default function App() {
         toasts={toasts}
       />
     </div>
+  );
+}
+
+function ServiceCatalog({ loading, onRequest, services }) {
+  return (
+    <section className="catalog-page">
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Catalog</p>
+          <h2>Service Catalog</h2>
+          <p className="dashboard-copy">
+            Select a standard OpenStack service blueprint and submit it for policy review.
+          </p>
+        </div>
+        <span className="status-pill">{services.length} services</span>
+      </div>
+
+      {loading && (
+        <div className="catalog-loading">
+          <span className="spinner" />
+          <span>Loading catalog...</span>
+        </div>
+      )}
+
+      <div className="catalog-grid">
+        {services.map((service) => (
+          <article className="catalog-card" key={service.id}>
+            <div className="catalog-card-header">
+              <div>
+                <h3>{service.name}</h3>
+                <p>{service.description}</p>
+              </div>
+              <span className={`risk-pill ${service.risk_level}`}>{service.risk_level}</span>
+            </div>
+            <dl className="catalog-specs">
+              <Detail label="CPU" value={`${service.recommended_cpu} vCPU`} />
+              <Detail label="RAM" value={`${service.recommended_ram_gb} GB`} />
+              <Detail label="Disk" value={`${service.recommended_disk_gb} GB`} />
+              <Detail label="Cost" value={formatCurrency(service.estimated_monthly_cost)} />
+            </dl>
+            <button className="primary" onClick={() => onRequest(service)} type="button">
+              Request Service
+            </button>
+          </article>
+        ))}
+      </div>
+
+      {!loading && services.length === 0 && (
+        <div className="empty-state catalog-empty">
+          <strong>No catalog services found</strong>
+          <span>Check the catalog API and refresh the page.</span>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -403,13 +483,17 @@ function ServersList({ loading, servers, onAction }) {
   );
 }
 
-function CreateVmForm({ images, flavors, networks, onCreated, onError }) {
+function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onError }) {
   const [form, setForm] = useState(emptyCreateForm);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    setForm({ ...emptyCreateForm, ...initialValues });
+  }, [initialValues]);
+
   function updateField(event) {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const { checked, name, type, value } = event.target;
+    setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
   }
 
   async function submit(event) {
@@ -417,10 +501,8 @@ function CreateVmForm({ images, flavors, networks, onCreated, onError }) {
     setSaving(true);
     onError("");
     try {
-      const payload = Object.fromEntries(
-        Object.entries(form).filter(([, value]) => value.trim() !== ""),
-      );
-      await api.createServer(payload);
+      const payload = buildVmRequestPayload(form);
+      await api.submitVmRequest(payload);
       setForm(emptyCreateForm);
       await onCreated();
     } catch (err) {
@@ -433,7 +515,7 @@ function CreateVmForm({ images, flavors, networks, onCreated, onError }) {
   return (
     <section>
       <div className="section-title">
-        <h2>Create VM</h2>
+        <h2>VM Request</h2>
       </div>
       <form className="form-grid" onSubmit={submit}>
         <label>
@@ -485,8 +567,80 @@ function CreateVmForm({ images, flavors, networks, onCreated, onError }) {
             value={form.security_group_id}
           />
         </label>
+        <label>
+          CPU
+          <input min="1" name="cpu" onChange={updateField} required type="number" value={form.cpu} />
+        </label>
+        <label>
+          RAM GB
+          <input
+            min="1"
+            name="ram_gb"
+            onChange={updateField}
+            required
+            type="number"
+            value={form.ram_gb}
+          />
+        </label>
+        <label>
+          Disk GB
+          <input
+            min="1"
+            name="disk_gb"
+            onChange={updateField}
+            required
+            type="number"
+            value={form.disk_gb}
+          />
+        </label>
+        <label>
+          Environment
+          <select name="environment" onChange={updateField} required value={form.environment}>
+            <option value="dev">dev</option>
+            <option value="test">test</option>
+            <option value="stage">stage</option>
+            <option value="prod">prod</option>
+          </select>
+        </label>
+        <label>
+          App tag
+          <input name="app_tag" onChange={updateField} required value={form.app_tag} />
+        </label>
+        <label>
+          Cost center
+          <input name="cost_center" onChange={updateField} required value={form.cost_center} />
+        </label>
+        <label>
+          Lifetime days
+          <input
+            min="1"
+            name="lifetime_days"
+            onChange={updateField}
+            required
+            type="number"
+            value={form.lifetime_days}
+          />
+        </label>
+        <label>
+          Packages
+          <input
+            name="packages"
+            onChange={updateField}
+            placeholder="python, git, docker"
+            value={form.packages}
+          />
+        </label>
+        <label className="checkbox-label">
+          <input
+            checked={form.public_ip_required}
+            name="public_ip_required"
+            onChange={updateField}
+            type="checkbox"
+          />
+          Public IP required
+        </label>
         <button className="primary form-submit" disabled={saving} type="submit">
-          {saving ? "Creating..." : "Create VM"}
+          {saving ? "Submitting..." : "Submit Request"}
         </button>
       </form>
     </section>
@@ -771,6 +925,60 @@ function isPrivateIp(ipAddress) {
 
 function normalizeStatus(status) {
   return String(status ?? "unknown").toLowerCase().replaceAll(" ", "-");
+}
+
+function buildCatalogRequestDefaults(service) {
+  return {
+    ...emptyCreateForm,
+    name: service.id,
+    cpu: String(service.recommended_cpu),
+    ram_gb: String(service.recommended_ram_gb),
+    disk_gb: String(service.recommended_disk_gb),
+    environment: service.environment,
+    app_tag: service.app_tag,
+    lifetime_days: "30",
+    packages: service.packages.join(", "),
+    public_ip_required: service.public_ip_required,
+  };
+}
+
+function buildVmRequestPayload(form) {
+  const payload = {
+    name: form.name,
+    image_id: form.image_id,
+    flavor_id: form.flavor_id,
+    network_id: form.network_id,
+    cpu: Number(form.cpu),
+    ram_gb: Number(form.ram_gb),
+    disk_gb: Number(form.disk_gb),
+    environment: form.environment,
+    app_tag: form.app_tag,
+    cost_center: form.cost_center,
+    lifetime_days: Number(form.lifetime_days),
+    packages: form.packages
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    public_ip_required: form.public_ip_required,
+  };
+
+  if (form.security_group_id.trim()) {
+    payload.security_group_id = form.security_group_id.trim();
+  }
+
+  if (form.key_name.trim()) {
+    payload.key_name = form.key_name.trim();
+  }
+
+  return payload;
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-IN", {
+    currency: "INR",
+    maximumFractionDigits: 0,
+    style: "currency",
+  }).format(value);
 }
 
 function formatSize(size) {

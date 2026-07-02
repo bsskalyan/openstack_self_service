@@ -202,6 +202,11 @@ h2 {
   gap: 20px;
 }
 
+.catalog-page {
+  display: grid;
+  gap: 18px;
+}
+
 .dashboard-hero {
   align-items: center;
   background: #ffffff;
@@ -222,6 +227,85 @@ h2 {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(5, minmax(160px, 1fr));
+}
+
+.catalog-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+}
+
+.catalog-card {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+}
+
+.catalog-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.catalog-card h3 {
+  margin: 0;
+}
+
+.catalog-card p {
+  color: #65738a;
+  margin: 8px 0 0;
+}
+
+.catalog-specs {
+  display: grid;
+  gap: 8px 14px;
+  grid-template-columns: 90px minmax(0, 1fr);
+  margin: 0;
+}
+
+.risk-pill {
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 9px;
+  text-transform: uppercase;
+}
+
+.risk-pill.low {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.risk-pill.medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.risk-pill.high {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.catalog-loading,
+.catalog-empty {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+}
+
+.catalog-loading {
+  align-items: center;
+  color: #526173;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 22px;
 }
 
 .metric-card,
@@ -589,6 +673,17 @@ label {
   gap: 6px;
 }
 
+.checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-height: 40px;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
 input,
 select {
   background: #ffffff;
@@ -637,6 +732,10 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-hero {
     align-items: flex-start;
     flex-direction: column;
@@ -659,7 +758,8 @@ select {
 }
 
 @media (max-width: 560px) {
-  .metric-grid {
+  .metric-grid,
+  .catalog-grid {
     grid-template-columns: 1fr;
   }
 }

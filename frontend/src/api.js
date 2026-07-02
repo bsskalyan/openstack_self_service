@@ -29,6 +29,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  listCatalogServices: () => request("/catalog/services"),
   getStatus: () => request("/openstack/status"),
   listServers: () => request("/openstack/servers"),
   listImages: () => request("/openstack/images"),
@@ -37,6 +38,11 @@ export const api = {
   listFloatingIps: () => request("/openstack/floating-ips"),
   createServer: (payload) =>
     request("/openstack/servers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  submitVmRequest: (payload) =>
+    request("/openstack/requests", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
