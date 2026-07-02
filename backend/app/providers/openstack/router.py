@@ -210,6 +210,21 @@ async def list_vm_requests(
     return openstack_service.list_vm_requests()
 
 
+@router.get(
+    "/requests/{request_id}",
+    response_model=OpenStackVMRequestRecord,
+    status_code=status.HTTP_200_OK,
+)
+async def get_vm_request(
+    request_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.get_vm_request(request_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack VM request lookup", exc) from exc
+
+
 @router.post(
     "/requests/{request_id}/approve",
     response_model=OpenStackVMRequestRecord,

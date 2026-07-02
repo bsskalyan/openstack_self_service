@@ -462,6 +462,18 @@ dd {
   gap: 18px;
 }
 
+.requests-page {
+  display: grid;
+  gap: 18px;
+}
+
+.requests-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 0.8fr);
+  align-items: start;
+}
+
 .server-table-card {
   background: #ffffff;
   border: 1px solid #dce3ee;
@@ -472,6 +484,18 @@ dd {
 
 .server-table-card table {
   min-width: 1120px;
+}
+
+.requests-table table {
+  min-width: 1180px;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td {
+  background: #f8fafc;
 }
 
 .table-loading {
@@ -533,6 +557,36 @@ dd {
 }
 
 .server-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.request-status {
+  background: #eef2f6;
+  border-radius: 999px;
+  color: #475467;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.request-status.provisioned,
+.request-status.approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.request-status.provisioned_notify,
+.request-status.draft,
+.request-status.approval_required {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.request-status.rejected {
   background: #fee2e2;
   color: #991b1b;
 }
@@ -717,36 +771,85 @@ input[readonly] {
   color: #526173;
 }
 
+.field-hint {
+  color: #65738a;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .governance-panel {
-  background: #f8fafc;
-  border: 1px solid #dce3ee;
+  background: #ffffff;
+  border: 1px solid #c7f0d8;
   border-radius: 8px;
   display: grid;
-  gap: 14px;
+  gap: 16px;
   grid-column: 1 / -1;
-  padding: 16px;
+  padding: 18px;
 }
 
-.governance-summary {
+.governance-hero {
   align-items: center;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  padding: 12px;
 }
 
-.governance-summary strong {
-  color: #172033;
+.governance-hero strong {
+  color: #166534;
+  font-size: 20px;
 }
 
-.governance-summary > span:last-child {
-  color: #65738a;
+.governance-hero > span:last-child {
+  color: #166534;
+  font-weight: 700;
   text-transform: capitalize;
 }
 
-.governance-details {
+.governance-cards {
   display: grid;
-  gap: 8px 16px;
-  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.governance-cards div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.governance-cards dt {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.governance-cards dd {
+  color: #172033;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.governance-cards dd.auto_approved {
+  color: #166534;
+}
+
+.governance-cards dd.approval_required {
+  color: #92400e;
+}
+
+.governance-reason-block {
+  display: grid;
+  gap: 10px;
+}
+
+.governance-reason-block h4 {
   margin: 0;
 }
 
@@ -755,7 +858,27 @@ input[readonly] {
   display: grid;
   gap: 6px;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+}
+
+.governance-reasons li {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+}
+
+.governance-reasons li::marker {
+  content: "";
+}
+
+.governance-reasons li.positive span {
+  color: #16a34a;
+  font-weight: 900;
+}
+
+.governance-reasons li.warning span {
+  color: #d97706;
+  font-weight: 900;
 }
 
 .decision-pill {
@@ -804,6 +927,54 @@ input[readonly] {
   padding: 10px 12px;
 }
 
+.request-details-panel {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 126px);
+  overflow: auto;
+  padding: 18px;
+  position: sticky;
+  top: 28px;
+}
+
+.request-details-panel.empty-panel {
+  align-content: center;
+  color: #65738a;
+  min-height: 260px;
+  text-align: center;
+}
+
+.request-details-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.details-section {
+  display: grid;
+  gap: 10px;
+}
+
+.details-section h4 {
+  margin: 0;
+}
+
+.details-section pre {
+  background: #0f172a;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
 .form-submit {
   grid-column: 1 / -1;
   width: max-content;
@@ -833,7 +1004,8 @@ input[readonly] {
 
   .nav-tabs,
   .form-grid,
-  .inline-form {
+  .inline-form,
+  .requests-layout {
     grid-template-columns: 1fr;
   }
 
@@ -863,6 +1035,11 @@ input[readonly] {
   .toast {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .request-details-panel {
+    max-height: none;
+    position: static;
   }
 }
 

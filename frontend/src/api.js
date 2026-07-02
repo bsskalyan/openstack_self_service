@@ -35,6 +35,8 @@ export const api = {
   listImages: () => request("/openstack/images"),
   listFlavors: () => request("/openstack/flavors"),
   listNetworks: () => request("/openstack/networks"),
+  listSecurityGroups: () => request("/openstack/security-groups"),
+  listKeypairs: () => request("/openstack/keypairs"),
   listFloatingIps: () => request("/openstack/floating-ips"),
   createServer: (payload) =>
     request("/openstack/servers", {
@@ -46,6 +48,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listVmRequests: () => request("/openstack/requests"),
+  getVmRequest: (requestId) => request(`/openstack/requests/${requestId}`),
   startServer: (serverId) =>
     request(`/openstack/servers/${serverId}/start`, { method: "POST" }),
   stopServer: (serverId) =>

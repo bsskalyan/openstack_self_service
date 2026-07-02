@@ -5,6 +5,7 @@ import { api } from "./api";
 const tabs = [
   { id: "dashboard", label: "Dashboard" },
   { id: "catalog", label: "Service Catalog" },
+  { id: "requests", label: "My Requests" },
   { id: "servers", label: "Servers" },
   { id: "create", label: "Create VM" },
   { id: "images", label: "Images" },
@@ -41,8 +42,11 @@ function useOpenStackData() {
     images: [],
     flavors: [],
     networks: [],
+    securityGroups: [],
+    keypairs: [],
     floatingIps: [],
     catalogServices: [],
+    vmRequests: [],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -58,12 +62,18 @@ function useOpenStackData() {
       ["images", api.listImages()],
       ["flavors", api.listFlavors()],
       ["networks", api.listNetworks()],
+      ["securityGroups", api.listSecurityGroups()],
+      ["keypairs", api.listKeypairs()],
       ["floatingIps", api.listFloatingIps()],
     ];
 
-    const [openStackResults, catalogResult] = await Promise.all([
+    const [openStackResults, catalogResult, vmRequestsResult] = await Promise.all([
       Promise.allSettled(openStackRequests.map(([, request]) => request)),
       api.listCatalogServices().then(
+        (value) => ({ status: "fulfilled", value }),
+        (reason) => ({ status: "rejected", reason }),
+      ),
+      api.listVmRequests().then(
         (value) => ({ status: "fulfilled", value }),
         (reason) => ({ status: "rejected", reason }),
       ),
@@ -75,8 +85,11 @@ function useOpenStackData() {
       images: [],
       flavors: [],
       networks: [],
+      securityGroups: [],
+      keypairs: [],
       floatingIps: [],
       catalogServices: [],
+      vmRequests: [],
     };
     let openStackErrorCount = 0;
 
@@ -94,6 +107,12 @@ function useOpenStackData() {
       nextData.catalogServices = catalogResult.value;
     } else {
       setError(`Service catalog failed: ${catalogResult.reason.message}`);
+    }
+
+    if (vmRequestsResult.status === "fulfilled") {
+      nextData.vmRequests = vmRequestsResult.value;
+    } else {
+      setError(`VM requests failed: ${vmRequestsResult.reason.message}`);
     }
 
     setProviderReachable(openStackErrorCount === 0);
@@ -196,6 +215,13 @@ export default function App() {
             services={data.catalogServices}
           />
         )}
+        {activeTab === "requests" && (
+          <MyRequestsPage
+            loading={loading}
+            onError={setError}
+            requests={data.vmRequests}
+          />
+        )}
         {activeTab === "servers" && (
           <ServersList
             loading={loading}
@@ -209,7 +235,10 @@ export default function App() {
             flavors={data.flavors}
             images={data.images}
             initialValues={requestDefaults}
+            keypairs={data.keypairs}
             networks={data.networks}
+            providerReachable={providerReachable}
+            securityGroups={data.securityGroups}
             onCreated={async (result) => {
               const message = getSubmissionMessage(result);
               setNotice(message);
@@ -292,6 +321,186 @@ function ServiceCatalog({ loading, onRequest, services }) {
           <span>Check the catalog API and refresh the page.</span>
         </div>
       )}
+    </section>
+  );
+}
+
+function MyRequestsPage({ loading, onError, requests }) {
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
+  async function openRequest(requestId) {
+    setDetailsLoading(true);
+    onError("");
+    try {
+      const result = await api.getVmRequest(requestId);
+      setSelectedRequest(result);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  return (
+    <section className="requests-page">
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Governance</p>
+          <h2>My Requests</h2>
+          <p className="dashboard-copy">
+            Review submitted service requests, policy decisions, and provisioning results.
+          </p>
+        </div>
+        <span className="status-pill">{requests.length} requests</span>
+      </div>
+
+      <div className="requests-layout">
+        <div className="server-table-card requests-table">
+          {loading && (
+            <div className="table-loading">
+              <span className="spinner" />
+              <span>Loading requests...</span>
+            </div>
+          )}
+          <table>
+            <thead>
+              <tr>
+                <th>Request ID</th>
+                <th>Catalog Item</th>
+                <th>Status</th>
+                <th>Governance Score</th>
+                <th>Approval Decision</th>
+                <th>Estimated Cost</th>
+                <th>Created Time</th>
+                <th>Provider</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading &&
+                requests.map((request) => (
+                  <tr
+                    className="clickable-row"
+                    key={request.id}
+                    onClick={() => openRequest(request.id)}
+                  >
+                    <td>
+                      <strong>{shortId(request.id)}</strong>
+                      <small>{request.id}</small>
+                    </td>
+                    <td>{request.request?.catalog_service_name || request.request?.app_tag || "-"}</td>
+                    <td>
+                      <span className={`request-status ${normalizeStatus(request.status)}`}>
+                        {formatDecision(request.status)}
+                      </span>
+                    </td>
+                    <td>{request.policy?.governance_score ?? "-"}</td>
+                    <td>{formatDecision(request.policy?.final_decision)}</td>
+                    <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
+                    <td>{formatDateTime(request.created_at)}</td>
+                    <td>OpenStack</td>
+                  </tr>
+                ))}
+              {!loading && requests.length === 0 && (
+                <tr>
+                  <td className="empty-state-cell" colSpan={8}>
+                    <div className="empty-state">
+                      <strong>No requests found</strong>
+                      <span>Submit a catalog request to see it here.</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <RequestDetailsPanel
+          loading={detailsLoading}
+          request={selectedRequest}
+          onClose={() => setSelectedRequest(null)}
+        />
+      </div>
+    </section>
+  );
+}
+
+function RequestDetailsPanel({ loading, onClose, request }) {
+  if (!request && !loading) {
+    return (
+      <aside className="request-details-panel empty-panel">
+        <p className="eyebrow">Details</p>
+        <h3>Select a request</h3>
+        <p className="dashboard-copy">Click any request row to inspect its payload and policy.</p>
+      </aside>
+    );
+  }
+
+  if (loading) {
+    return (
+      <aside className="request-details-panel empty-panel">
+        <span className="spinner" />
+        <p>Loading request details...</p>
+      </aside>
+    );
+  }
+
+  const policy = request.policy ?? {};
+  const payload = request.request ?? {};
+
+  return (
+    <aside className="request-details-panel">
+      <div className="request-details-header">
+        <div>
+          <p className="eyebrow">Details</p>
+          <h3>{payload.name || shortId(request.id)}</h3>
+        </div>
+        <button onClick={onClose} type="button">
+          Close
+        </button>
+      </div>
+
+      <dl className="request-result-details">
+        <Detail label="Request ID" value={request.id} />
+        <Detail label="Status" value={formatDecision(request.status)} />
+        <Detail label="Selected service" value={payload.catalog_service_name} />
+        <Detail label="Provider" value="OpenStack" />
+        <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
+        <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
+        <Detail label="Governance score" value={policy.governance_score} />
+        <Detail label="Estimated cost" value={formatCurrency(policy.estimated_monthly_cost)} />
+        <Detail label="Created" value={formatDateTime(request.created_at)} />
+      </dl>
+
+      <section className="details-section">
+        <h4>Governance Score Breakdown</h4>
+        {policy.reasons?.length > 0 ? (
+          <ul className="governance-reasons">
+            {policy.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="dashboard-copy">No policy concerns detected.</p>
+        )}
+      </section>
+
+      <JsonBlock title="Full Request Payload" value={payload} />
+      <JsonBlock title="Policy Evaluation" value={policy} />
+      <JsonBlock title="Created VM / Server" value={request.server} />
+
+      {request.provisioning_error && (
+        <p className="request-result-note">{request.provisioning_error}</p>
+      )}
+    </aside>
+  );
+}
+
+function JsonBlock({ title, value }) {
+  return (
+    <section className="details-section">
+      <h4>{title}</h4>
+      <pre>{JSON.stringify(value ?? null, null, 2)}</pre>
     </section>
   );
 }
@@ -516,15 +725,35 @@ function ServersList({ loading, providerReachable, servers, onAction }) {
   );
 }
 
-function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onError }) {
+function CreateVmForm({
+  images,
+  flavors,
+  initialValues,
+  keypairs,
+  networks,
+  providerReachable,
+  securityGroups,
+  onCreated,
+  onError,
+}) {
   const [form, setForm] = useState(emptyCreateForm);
   const [saving, setSaving] = useState(false);
   const [lastSubmission, setLastSubmission] = useState(null);
   const governance = evaluateGovernancePreview(form);
+  const providerSelectionDisabled = !providerReachable && Boolean(form.catalog_service_name);
 
   useEffect(() => {
-    setForm({ ...emptyCreateForm, ...initialValues });
-  }, [initialValues]);
+    setForm(
+      buildCreateFormInitialValues(initialValues, {
+        flavors,
+        images,
+        keypairs,
+        networks,
+        providerReachable,
+        securityGroups,
+      }),
+    );
+  }, [flavors, images, initialValues, keypairs, networks, providerReachable, securityGroups]);
 
   function updateField(event) {
     const { checked, name, type, value } = event.target;
@@ -560,48 +789,126 @@ function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onE
         </label>
         <label>
           Image
-          <select name="image_id" onChange={updateField} required value={form.image_id}>
+          <select
+            disabled={providerSelectionDisabled}
+            name="image_id"
+            onChange={updateField}
+            required
+            value={form.image_id}
+          >
             <option value="">Select image</option>
+            {providerSelectionDisabled && (
+              <option value="auto:image">Selected automatically</option>
+            )}
             {images.map((image) => (
               <option key={image.id} value={image.id}>
                 {image.name || image.id}
               </option>
             ))}
           </select>
+          {providerSelectionDisabled && (
+            <span className="field-hint">
+              Will be selected automatically when the provider becomes available.
+            </span>
+          )}
         </label>
         <label>
           Flavor
-          <select name="flavor_id" onChange={updateField} required value={form.flavor_id}>
+          <select
+            disabled={providerSelectionDisabled}
+            name="flavor_id"
+            onChange={updateField}
+            required
+            value={form.flavor_id}
+          >
             <option value="">Select flavor</option>
+            {providerSelectionDisabled && (
+              <option value="auto:flavor">Selected automatically</option>
+            )}
             {flavors.map((flavor) => (
               <option key={flavor.id} value={flavor.id}>
                 {flavor.name || flavor.id}
               </option>
             ))}
           </select>
+          {providerSelectionDisabled && (
+            <span className="field-hint">
+              Will be selected automatically when the provider becomes available.
+            </span>
+          )}
         </label>
         <label>
           Network
-          <select name="network_id" onChange={updateField} required value={form.network_id}>
+          <select
+            disabled={providerSelectionDisabled}
+            name="network_id"
+            onChange={updateField}
+            required
+            value={form.network_id}
+          >
             <option value="">Select network</option>
+            {providerSelectionDisabled && (
+              <option value="auto:network">Selected automatically</option>
+            )}
             {networks.map((network) => (
               <option key={network.id} value={network.id}>
                 {network.name || network.id}
               </option>
             ))}
           </select>
+          {providerSelectionDisabled && (
+            <span className="field-hint">
+              Will be selected automatically when the provider becomes available.
+            </span>
+          )}
         </label>
         <label>
-          Key name
-          <input name="key_name" onChange={updateField} value={form.key_name} />
+          Keypair
+          <select
+            disabled={providerSelectionDisabled}
+            name="key_name"
+            onChange={updateField}
+            value={form.key_name}
+          >
+            <option value="">No keypair</option>
+            {providerSelectionDisabled && (
+              <option value="auto:keypair">Selected automatically</option>
+            )}
+            {keypairs.map((keypair) => (
+              <option key={keypair.name} value={keypair.name}>
+                {keypair.name}
+              </option>
+            ))}
+          </select>
+          {providerSelectionDisabled && (
+            <span className="field-hint">
+              Will be selected automatically when the provider becomes available.
+            </span>
+          )}
         </label>
         <label>
-          Security group ID
-          <input
+          Security group
+          <select
+            disabled={providerSelectionDisabled}
             name="security_group_id"
             onChange={updateField}
             value={form.security_group_id}
-          />
+          >
+            <option value="">No security group</option>
+            {providerSelectionDisabled && (
+              <option value="auto:security-group">Selected automatically</option>
+            )}
+            {securityGroups.map((securityGroup) => (
+              <option key={securityGroup.id} value={securityGroup.id}>
+                {securityGroup.name || securityGroup.id}
+              </option>
+            ))}
+          </select>
+          {providerSelectionDisabled && (
+            <span className="field-hint">
+              Will be selected automatically when the provider becomes available.
+            </span>
+          )}
         </label>
         <label>
           CPU
@@ -733,33 +1040,52 @@ function RequestSubmissionResult({ result }) {
 }
 
 function GovernancePreview({ evaluation, serviceName }) {
+  const display = buildGovernanceDisplay(evaluation, serviceName);
+
   return (
     <section className="governance-panel">
       <div>
         <p className="eyebrow">Governance</p>
-        <h3>Policy Evaluation</h3>
+        <h3>Governance Evaluation</h3>
       </div>
       {serviceName && <p className="dashboard-copy">Selected service: {serviceName}</p>}
-      <div className="governance-summary">
-        <span className={`decision-pill ${evaluation.finalDecision}`}>
-          {formatDecision(evaluation.finalDecision)}
-        </span>
+
+      <div className="governance-hero">
+        <span className={`decision-pill ${evaluation.finalDecision}`}>{display.decision}</span>
         <strong>Score {evaluation.score}</strong>
-        <span>{formatDecision(evaluation.governanceDecision)}</span>
+        <span>{display.governanceAction}</span>
       </div>
-      <dl className="governance-details">
-        <Detail label="Estimated cost" value={formatCurrency(evaluation.estimatedMonthlyCost)} />
-        <Detail label="Basic policy" value={formatDecision(evaluation.basicDecision)} />
+
+      <dl className="governance-cards">
+        <div>
+          <dt>Decision</dt>
+          <dd className={evaluation.finalDecision}>{display.decision}</dd>
+        </div>
+        <div>
+          <dt>Estimated Cost</dt>
+          <dd>{formatCurrency(evaluation.estimatedMonthlyCost)} / month</dd>
+        </div>
+        <div>
+          <dt>Risk Score</dt>
+          <dd>{evaluation.score} / 100</dd>
+        </div>
+        <div>
+          <dt>Next Action</dt>
+          <dd>{display.nextAction}</dd>
+        </div>
       </dl>
-      {evaluation.reasons.length > 0 ? (
+
+      <div className="governance-reason-block">
+        <h4>Reason</h4>
         <ul className="governance-reasons">
-          {evaluation.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
+          {display.reasons.map((reason) => (
+            <li className={reason.tone} key={reason.label}>
+              <span>{reason.tone === "positive" ? "✓" : "!"}</span>
+              {reason.label}
+            </li>
           ))}
         </ul>
-      ) : (
-        <p className="dashboard-copy">No policy concerns detected.</p>
-      )}
+      </div>
     </section>
   );
 }
@@ -1055,6 +1381,115 @@ function normalizeStatus(status) {
   return String(status ?? "unknown").toLowerCase().replaceAll(" ", "-");
 }
 
+function shortId(value) {
+  return String(value || "-").slice(0, 8);
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function buildCreateFormInitialValues(
+  initialValues,
+  { flavors, images, keypairs, networks, providerReachable, securityGroups },
+) {
+  const nextValues = { ...emptyCreateForm, ...initialValues };
+
+  if (!nextValues.catalog_service_name) {
+    return nextValues;
+  }
+
+  if (!providerReachable) {
+    return {
+      ...nextValues,
+      image_id: "auto:image",
+      flavor_id: "auto:flavor",
+      network_id: "auto:network",
+      key_name: "auto:keypair",
+      security_group_id: "auto:security-group",
+    };
+  }
+
+  return {
+    ...nextValues,
+    image_id: nextValues.image_id || selectDefaultImage(images)?.id || "",
+    flavor_id: nextValues.flavor_id || selectDefaultFlavor(flavors, nextValues)?.id || "",
+    network_id: nextValues.network_id || selectDefaultNetwork(networks)?.id || "",
+    key_name: nextValues.key_name || selectDefaultKeypair(keypairs)?.name || "",
+    security_group_id:
+      nextValues.security_group_id || selectDefaultSecurityGroup(securityGroups)?.id || "",
+  };
+}
+
+function selectDefaultImage(images) {
+  return (
+    images.find((image) => normalizeStatus(image.status) === "active") ??
+    images.find((image) => image.id) ??
+    null
+  );
+}
+
+function selectDefaultFlavor(flavors, form) {
+  const requestedCpu = Number(form.cpu || 0);
+  const requestedRamMb = Number(form.ram_gb || 0) * 1024;
+  const requestedDiskGb = Number(form.disk_gb || 0);
+  const sortedFlavors = [...flavors].sort((left, right) => {
+    const leftWeight =
+      Number(left.vcpus || 0) * 1_000_000 +
+      Number(left.ram || 0) * 1_000 +
+      Number(left.disk || 0);
+    const rightWeight =
+      Number(right.vcpus || 0) * 1_000_000 +
+      Number(right.ram || 0) * 1_000 +
+      Number(right.disk || 0);
+    return leftWeight - rightWeight;
+  });
+
+  return (
+    sortedFlavors.find(
+      (flavor) =>
+        Number(flavor.vcpus || 0) >= requestedCpu &&
+        Number(flavor.ram || 0) >= requestedRamMb &&
+        Number(flavor.disk || 0) >= requestedDiskGb,
+    ) ??
+    sortedFlavors.find((flavor) => flavor.id) ??
+    null
+  );
+}
+
+function selectDefaultNetwork(networks) {
+  return (
+    networks.find((network) => !network.is_router_external && normalizeStatus(network.status) === "active") ??
+    networks.find((network) => !network.is_router_external) ??
+    networks.find((network) => network.id) ??
+    null
+  );
+}
+
+function selectDefaultSecurityGroup(securityGroups) {
+  return (
+    securityGroups.find((securityGroup) => securityGroup.name === "default") ??
+    securityGroups.find((securityGroup) => securityGroup.id) ??
+    null
+  );
+}
+
+function selectDefaultKeypair(keypairs) {
+  return keypairs.find((keypair) => keypair.name) ?? null;
+}
+
 function buildCatalogRequestDefaults(service) {
   return {
     ...emptyCreateForm,
@@ -1126,6 +1561,40 @@ function formatCurrency(value) {
     maximumFractionDigits: 0,
     style: "currency",
   }).format(Number(value));
+}
+
+function buildGovernanceDisplay(evaluation, serviceName) {
+  const isApprovalRequired = evaluation.finalDecision === "approval_required";
+  const isNotify = evaluation.governanceDecision === "auto_provision_notify";
+
+  if (isApprovalRequired) {
+    return {
+      decision: "Approval Required",
+      governanceAction: "Approval Required",
+      nextAction: "Request will be routed for approval.",
+      reasons: evaluation.reasons.map((reason) => ({
+        label: reason,
+        tone: "warning",
+      })),
+    };
+  }
+
+  return {
+    decision: isNotify ? "🟢 Auto Approved + Notify" : "🟢 Auto Approved",
+    governanceAction: isNotify ? "Auto Provision + Notify" : "Auto Provision",
+    nextAction: isNotify
+      ? "VM will be provisioned automatically and stakeholders will be notified."
+      : "VM will be provisioned automatically.",
+    reasons: [
+      { label: "Cost within allowed budget", tone: "positive" },
+      { label: "Compute within auto-approval limits", tone: "positive" },
+      { label: "Internal network only", tone: "positive" },
+      {
+        label: serviceName ? "Approved service template" : "Approved request template",
+        tone: "positive",
+      },
+    ],
+  };
 }
 
 function evaluateGovernancePreview(form) {
