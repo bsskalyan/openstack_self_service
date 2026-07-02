@@ -163,6 +163,42 @@ class OpenStackService:
             logger.exception("Failed to list OpenStack servers")
             raise OpenStackServiceError("Failed to list OpenStack servers") from exc
 
+    def list_floating_ips(self) -> list[dict[str, Any]]:
+        try:
+            return [
+                self._serialize_floating_ip(floating_ip)
+                for floating_ip in self.get_connection().network.ips()
+            ]
+        except SDKException as exc:
+            logger.exception("Failed to list OpenStack floating IPs")
+            raise OpenStackServiceError(
+                f"Failed to list OpenStack floating IPs: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def create_floating_ip(self, public_network_id: str | None = None) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            public_network = self._resolve_public_network(connection, public_network_id)
+            logger.info(
+                "Creating OpenStack floating IP from network id='%s', name='%s'",
+                public_network.id,
+                getattr(public_network, "name", None),
+            )
+            floating_ip = connection.network.create_ip(
+                floating_network_id=public_network.id,
+            )
+            logger.info(
+                "Created OpenStack floating IP id='%s', address='%s'",
+                floating_ip.id,
+                getattr(floating_ip, "floating_ip_address", None),
+            )
+            return self._serialize_floating_ip(floating_ip)
+        except SDKException as exc:
+            logger.exception("Failed to create OpenStack floating IP")
+            raise OpenStackServiceError(
+                f"Failed to create OpenStack floating IP: {self._format_openstack_error(exc)}",
+            ) from exc
+
     def create_server(
         self,
         *,
@@ -277,6 +313,68 @@ class OpenStackService:
                 f"Failed to reboot OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
+    def attach_floating_ip(
+        self,
+        *,
+        server_id: str,
+        floating_ip: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            floating_ip_resource = (
+                self._find_floating_ip_by_address(connection, floating_ip)
+                if floating_ip
+                else connection.network.create_ip(
+                    floating_network_id=self._resolve_public_network(connection).id,
+                )
+            )
+            address = floating_ip_resource.floating_ip_address
+
+            logger.info(
+                "Attaching OpenStack floating IP '%s' to server id='%s'",
+                address,
+                server.id,
+            )
+            connection.compute.add_floating_ip_to_server(server, address)
+            return {
+                "server_id": server.id,
+                "floating_ip": address,
+                "action": "attach",
+                "status": "accepted",
+            }
+        except SDKException as exc:
+            logger.exception("Failed to attach floating IP to server id='%s'", server_id)
+            raise OpenStackServiceError(
+                f"Failed to attach floating IP: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def detach_floating_ip(self, *, server_id: str, floating_ip: str) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            logger.info(
+                "Detaching OpenStack floating IP '%s' from server id='%s'",
+                floating_ip,
+                server.id,
+            )
+            connection.compute.remove_floating_ip_from_server(server, floating_ip)
+            return {
+                "server_id": server.id,
+                "floating_ip": floating_ip,
+                "action": "detach",
+                "status": "accepted",
+            }
+        except SDKException as exc:
+            logger.exception(
+                "Failed to detach floating IP '%s' from server id='%s'",
+                floating_ip,
+                server_id,
+            )
+            raise OpenStackServiceError(
+                f"Failed to detach floating IP: {self._format_openstack_error(exc)}",
+            ) from exc
+
     def _create_connection(self) -> Connection:
         self._validate_configuration()
 
@@ -384,6 +482,47 @@ class OpenStackService:
             "action": action,
             "status": "accepted",
         }
+
+    @staticmethod
+    def _serialize_floating_ip(floating_ip: Any) -> dict[str, Any]:
+        return {
+            "id": floating_ip.id,
+            "floating_ip_address": getattr(floating_ip, "floating_ip_address", None),
+            "status": getattr(floating_ip, "status", None),
+            "floating_network_id": getattr(floating_ip, "floating_network_id", None),
+            "port_id": getattr(floating_ip, "port_id", None),
+            "fixed_ip_address": getattr(floating_ip, "fixed_ip_address", None),
+            "router_id": getattr(floating_ip, "router_id", None),
+            "project_id": getattr(floating_ip, "project_id", None),
+        }
+
+    @staticmethod
+    def _resolve_public_network(
+        connection: Connection,
+        public_network_id: str | None = None,
+    ) -> Any:
+        if public_network_id:
+            return connection.network.find_network(public_network_id, ignore_missing=False)
+
+        public_network = connection.network.find_network("public", ignore_missing=True)
+        if public_network:
+            return public_network
+
+        for network in connection.network.networks():
+            if getattr(network, "is_router_external", False):
+                return network
+
+        raise OpenStackServiceError(
+            "Failed to resolve public network: no network named 'public' or external network found",
+        )
+
+    @staticmethod
+    def _find_floating_ip_by_address(connection: Connection, floating_ip: str) -> Any:
+        for floating_ip_resource in connection.network.ips():
+            if floating_ip_resource.floating_ip_address == floating_ip:
+                return floating_ip_resource
+
+        raise OpenStackServiceError(f"Floating IP not found: {floating_ip}")
 
     @staticmethod
     def _extract_server_image_id(server: Any) -> str | None:

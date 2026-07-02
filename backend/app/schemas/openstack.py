@@ -112,3 +112,29 @@ class OpenStackServerLifecycleResponse(BaseModel):
     id: str
     action: str
     status: str
+
+
+class OpenStackFloatingIPResponse(BaseModel):
+    id: str
+    floating_ip_address: str | None
+    status: str | None
+    floating_network_id: str | None
+    port_id: str | None
+    fixed_ip_address: str | None
+    router_id: str | None
+    project_id: str | None
+
+
+class OpenStackCreateFloatingIPRequest(BaseModel):
+    public_network_id: str | None = Field(default=None, min_length=1)
+
+
+class OpenStackAttachFloatingIPRequest(BaseModel):
+    floating_ip: str | None = Field(default=None, min_length=1)
+
+
+class OpenStackFloatingIPActionResponse(BaseModel):
+    server_id: str
+    floating_ip: str
+    action: str
+    status: str
