@@ -280,14 +280,32 @@ class OpenStackService:
             )
             return self._request_store.save_request(record)
 
-        server = self.create_server(
-            name=request.name,
-            image_id=request.image_id,
-            flavor_id=request.flavor_id,
-            network_id=request.network_id,
-            key_name=request.key_name,
-            security_group_id=request.security_group_id,
-        )
+        try:
+            server = self.create_server(
+                name=request.name,
+                image_id=request.image_id,
+                flavor_id=request.flavor_id,
+                network_id=request.network_id,
+                key_name=request.key_name,
+                security_group_id=request.security_group_id,
+            )
+        except OpenStackServiceError as exc:
+            record = self._build_request_record(
+                request_id=request_id,
+                request=request,
+                policy_result=policy_result,
+                status="draft",
+                created_at=now,
+                updated_at=self._now(),
+                provisioning_error=str(exc),
+            )
+            logger.warning(
+                "Saved VM request id='%s' as draft because provisioning failed: %s",
+                request_id,
+                exc,
+            )
+            return self._request_store.save_request(record)
+
         status = (
             "provisioned_notify"
             if policy_result.governance_decision == "auto_provision_notify"
@@ -551,6 +569,7 @@ class OpenStackService:
         created_at: str,
         updated_at: str,
         server: dict[str, Any] | None = None,
+        provisioning_error: str | None = None,
     ) -> dict[str, Any]:
         return {
             "id": request_id,
@@ -559,6 +578,7 @@ class OpenStackService:
             "policy": policy_result.model_dump(),
             "server": server,
             "rejection_reason": None,
+            "provisioning_error": provisioning_error,
             "created_at": created_at,
             "updated_at": updated_at,
         }

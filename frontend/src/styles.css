@@ -197,6 +197,12 @@ h2 {
   color: #17663a;
 }
 
+.alert.warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
 .dashboard-page {
   display: grid;
   gap: 20px;
@@ -378,6 +384,12 @@ h2 {
   margin-top: 26px;
 }
 
+.metric-card strong.unavailable-value {
+  color: #64748b;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
 .metric-card p {
   color: #65738a;
   font-size: 13px;
@@ -431,6 +443,11 @@ dd {
 .status-pill.connected {
   background: #dcfce7;
   color: #166534;
+}
+
+.status-pill.unavailable {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .table-wrap {
@@ -693,6 +710,98 @@ select {
   min-height: 40px;
   padding: 8px 10px;
   width: 100%;
+}
+
+input[readonly] {
+  background: #f8fafc;
+  color: #526173;
+}
+
+.governance-panel {
+  background: #f8fafc;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-column: 1 / -1;
+  padding: 16px;
+}
+
+.governance-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.governance-summary strong {
+  color: #172033;
+}
+
+.governance-summary > span:last-child {
+  color: #65738a;
+  text-transform: capitalize;
+}
+
+.governance-details {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: 140px minmax(0, 1fr);
+  margin: 0;
+}
+
+.governance-reasons {
+  color: #43516a;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.decision-pill {
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 10px;
+  text-transform: uppercase;
+}
+
+.decision-pill.auto_approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.decision-pill.approval_required {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.request-result-panel {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.request-result-details {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  margin: 0;
+}
+
+.request-result-note {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  color: #92400e;
+  margin: 0;
+  padding: 10px 12px;
 }
 
 .form-submit {

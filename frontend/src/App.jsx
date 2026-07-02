@@ -29,6 +29,9 @@ const emptyCreateForm = {
   lifetime_days: "30",
   packages: "",
   public_ip_required: false,
+  estimated_monthly_cost: "",
+  risk_level: "",
+  catalog_service_name: "",
 };
 
 function useOpenStackData() {
@@ -43,22 +46,29 @@ function useOpenStackData() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [providerReachable, setProviderReachable] = useState(true);
 
   async function refresh() {
     setLoading(true);
     setError("");
 
-    const requests = [
+    const openStackRequests = [
       ["status", api.getStatus()],
       ["servers", api.listServers()],
       ["images", api.listImages()],
       ["flavors", api.listFlavors()],
       ["networks", api.listNetworks()],
       ["floatingIps", api.listFloatingIps()],
-      ["catalogServices", api.listCatalogServices()],
     ];
 
-    const results = await Promise.allSettled(requests.map(([, request]) => request));
+    const [openStackResults, catalogResult] = await Promise.all([
+      Promise.allSettled(openStackRequests.map(([, request]) => request)),
+      api.listCatalogServices().then(
+        (value) => ({ status: "fulfilled", value }),
+        (reason) => ({ status: "rejected", reason }),
+      ),
+    ]);
+
     const nextData = {
       status: null,
       servers: [],
@@ -68,22 +78,26 @@ function useOpenStackData() {
       floatingIps: [],
       catalogServices: [],
     };
-    const errors = [];
+    let openStackErrorCount = 0;
 
-    results.forEach((result, index) => {
-      const key = requests[index][0];
+    openStackResults.forEach((result, index) => {
+      const key = openStackRequests[index][0];
       if (result.status === "fulfilled") {
         nextData[key] = result.value;
         return;
       }
 
-      errors.push(`${key}: ${result.reason.message}`);
+      openStackErrorCount += 1;
     });
 
-    setData(nextData);
-    if (errors.length > 0) {
-      setError(errors.join(" | "));
+    if (catalogResult.status === "fulfilled") {
+      nextData.catalogServices = catalogResult.value;
+    } else {
+      setError(`Service catalog failed: ${catalogResult.reason.message}`);
     }
+
+    setProviderReachable(openStackErrorCount === 0);
+    setData(nextData);
     setLoading(false);
   }
 
@@ -91,7 +105,7 @@ function useOpenStackData() {
     refresh();
   }, []);
 
-  return { data, loading, error, setError, refresh };
+  return { data, loading, error, providerReachable, setError, refresh };
 }
 
 export default function App() {
@@ -99,7 +113,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [toasts, setToasts] = useState([]);
   const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
-  const { data, loading, error, setError, refresh } = useOpenStackData();
+  const { data, loading, error, providerReachable, setError, refresh } = useOpenStackData();
 
   function showToast(message, type = "success") {
     const id = window.crypto?.randomUUID?.() ?? String(Date.now());
@@ -162,10 +176,15 @@ export default function App() {
           </button>
         </header>
 
+        {!providerReachable && (
+          <div className="alert warning">OpenStack provider is currently unreachable.</div>
+        )}
         {error && <div className="alert error">{error}</div>}
         {notice && <div className="alert success">{notice}</div>}
 
-        {activeTab === "dashboard" && <Dashboard data={data} loading={loading} />}
+        {activeTab === "dashboard" && (
+          <Dashboard data={data} loading={loading} providerReachable={providerReachable} />
+        )}
         {activeTab === "catalog" && (
           <ServiceCatalog
             loading={loading}
@@ -178,7 +197,12 @@ export default function App() {
           />
         )}
         {activeTab === "servers" && (
-          <ServersList loading={loading} servers={data.servers} onAction={runAction} />
+          <ServersList
+            loading={loading}
+            providerReachable={providerReachable}
+            servers={data.servers}
+            onAction={runAction}
+          />
         )}
         {activeTab === "create" && (
           <CreateVmForm
@@ -186,9 +210,10 @@ export default function App() {
             images={data.images}
             initialValues={requestDefaults}
             networks={data.networks}
-            onCreated={async () => {
-              setNotice("VM request submitted");
-              showToast("VM request submitted", "success");
+            onCreated={async (result) => {
+              const message = getSubmissionMessage(result);
+              setNotice(message);
+              showToast(message, "success");
               await refresh();
             }}
             onError={setError}
@@ -200,6 +225,7 @@ export default function App() {
         {activeTab === "floatingIps" && (
           <FloatingIpsPanel
             floatingIps={data.floatingIps}
+            providerReachable={providerReachable}
             servers={data.servers}
             onAction={runAction}
           />
@@ -270,37 +296,39 @@ function ServiceCatalog({ loading, onRequest, services }) {
   );
 }
 
-function Dashboard({ data, loading }) {
-  const status = data.status?.status ?? (loading ? "loading" : "unknown");
+function Dashboard({ data, loading, providerReachable }) {
+  const status = providerReachable
+    ? data.status?.status ?? (loading ? "loading" : "unknown")
+    : "unavailable";
   const cloud = data.status?.cloud ?? {};
   const cards = [
     {
       label: "Total Images",
-      value: data.images.length,
+      value: providerReachable ? data.images.length : "Unavailable",
       helper: "Available boot sources",
       tone: "blue",
     },
     {
       label: "Total Flavors",
-      value: data.flavors.length,
+      value: providerReachable ? data.flavors.length : "Unavailable",
       helper: "Compute size options",
       tone: "green",
     },
     {
       label: "Total Networks",
-      value: data.networks.length,
+      value: providerReachable ? data.networks.length : "Unavailable",
       helper: "Tenant and external networks",
       tone: "cyan",
     },
     {
       label: "Total Servers",
-      value: data.servers.length,
+      value: providerReachable ? data.servers.length : "Unavailable",
       helper: "Provisioned instances",
       tone: "violet",
     },
     {
       label: "Floating IPs",
-      value: data.floatingIps.length,
+      value: providerReachable ? data.floatingIps.length : "Unavailable",
       helper: "Public address inventory",
       tone: "amber",
     },
@@ -336,7 +364,7 @@ function Dashboard({ data, loading }) {
   );
 }
 
-function ServersList({ loading, servers, onAction }) {
+function ServersList({ loading, providerReachable, servers, onAction }) {
   const [pendingServer, setPendingServer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -406,6 +434,7 @@ function ServersList({ loading, servers, onAction }) {
                       <div className="button-row server-actions">
                         <ActionButton
                           busy={pendingServer === `${server.id}:start`}
+                          disabled={!providerReachable}
                           label="Start"
                           onClick={() =>
                             runServerAction("start", "Start server", server, () =>
@@ -415,6 +444,7 @@ function ServersList({ loading, servers, onAction }) {
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:stop`}
+                          disabled={!providerReachable}
                           label="Stop"
                           onClick={() =>
                             runServerAction("stop", "Stop server", server, () =>
@@ -424,6 +454,7 @@ function ServersList({ loading, servers, onAction }) {
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:soft-reboot`}
+                          disabled={!providerReachable}
                           label="Soft Reboot"
                           onClick={() =>
                             runServerAction("soft-reboot", "Soft reboot server", server, () =>
@@ -433,6 +464,7 @@ function ServersList({ loading, servers, onAction }) {
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:hard-reboot`}
+                          disabled={!providerReachable}
                           label="Hard Reboot"
                           onClick={() =>
                             runServerAction("hard-reboot", "Hard reboot server", server, () =>
@@ -442,6 +474,7 @@ function ServersList({ loading, servers, onAction }) {
                         />
                         <button
                           className="danger"
+                          disabled={!providerReachable}
                           onClick={() => setConfirmDelete(server)}
                           type="button"
                         >
@@ -486,6 +519,8 @@ function ServersList({ loading, servers, onAction }) {
 function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onError }) {
   const [form, setForm] = useState(emptyCreateForm);
   const [saving, setSaving] = useState(false);
+  const [lastSubmission, setLastSubmission] = useState(null);
+  const governance = evaluateGovernancePreview(form);
 
   useEffect(() => {
     setForm({ ...emptyCreateForm, ...initialValues });
@@ -502,9 +537,10 @@ function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onE
     onError("");
     try {
       const payload = buildVmRequestPayload(form);
-      await api.submitVmRequest(payload);
+      const result = await api.submitVmRequest(payload);
+      setLastSubmission(result);
       setForm(emptyCreateForm);
-      await onCreated();
+      await onCreated(result);
     } catch (err) {
       onError(err.message);
     } finally {
@@ -630,6 +666,23 @@ function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onE
             value={form.packages}
           />
         </label>
+        <label>
+          Estimated cost
+          <input
+            name="estimated_monthly_cost"
+            onChange={updateField}
+            readOnly
+            value={
+              form.estimated_monthly_cost
+                ? formatCurrency(Number(form.estimated_monthly_cost))
+                : ""
+            }
+          />
+        </label>
+        <label>
+          Risk level
+          <input name="risk_level" onChange={updateField} readOnly value={form.risk_level} />
+        </label>
         <label className="checkbox-label">
           <input
             checked={form.public_ip_required}
@@ -639,10 +692,74 @@ function CreateVmForm({ images, flavors, initialValues, networks, onCreated, onE
           />
           Public IP required
         </label>
+        <GovernancePreview evaluation={governance} serviceName={form.catalog_service_name} />
         <button className="primary form-submit" disabled={saving} type="submit">
           {saving ? "Submitting..." : "Submit Request"}
         </button>
       </form>
+      {lastSubmission && <RequestSubmissionResult result={lastSubmission} />}
+    </section>
+  );
+}
+
+function RequestSubmissionResult({ result }) {
+  const selectedCatalogItem = result.request?.catalog_service_name;
+
+  return (
+    <section className="request-result-panel">
+      <div>
+        <p className="eyebrow">Request</p>
+        <h3>Submission Saved</h3>
+      </div>
+      <dl className="request-result-details">
+        <Detail label="Request ID" value={result.id} />
+        <Detail label="Status" value={formatDecision(result.status)} />
+        <Detail label="Selected service" value={selectedCatalogItem} />
+        <Detail label="Approval decision" value={formatDecision(result.policy?.final_decision)} />
+        <Detail label="Governance score" value={result.policy?.governance_score} />
+        <Detail
+          label="Estimated cost"
+          value={formatCurrency(result.policy?.estimated_monthly_cost)}
+        />
+      </dl>
+      {result.provisioning_error && (
+        <p className="request-result-note">
+          Provisioning was not attempted successfully because OpenStack is unreachable. The
+          request is saved and can be reviewed later.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function GovernancePreview({ evaluation, serviceName }) {
+  return (
+    <section className="governance-panel">
+      <div>
+        <p className="eyebrow">Governance</p>
+        <h3>Policy Evaluation</h3>
+      </div>
+      {serviceName && <p className="dashboard-copy">Selected service: {serviceName}</p>}
+      <div className="governance-summary">
+        <span className={`decision-pill ${evaluation.finalDecision}`}>
+          {formatDecision(evaluation.finalDecision)}
+        </span>
+        <strong>Score {evaluation.score}</strong>
+        <span>{formatDecision(evaluation.governanceDecision)}</span>
+      </div>
+      <dl className="governance-details">
+        <Detail label="Estimated cost" value={formatCurrency(evaluation.estimatedMonthlyCost)} />
+        <Detail label="Basic policy" value={formatDecision(evaluation.basicDecision)} />
+      </dl>
+      {evaluation.reasons.length > 0 ? (
+        <ul className="governance-reasons">
+          {evaluation.reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="dashboard-copy">No policy concerns detected.</p>
+      )}
     </section>
   );
 }
@@ -707,7 +824,7 @@ function NetworksList({ networks }) {
   );
 }
 
-function FloatingIpsPanel({ floatingIps, servers, onAction }) {
+function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction }) {
   const [selectedServer, setSelectedServer] = useState("");
   const [selectedIp, setSelectedIp] = useState("");
 
@@ -722,6 +839,7 @@ function FloatingIpsPanel({ floatingIps, servers, onAction }) {
         <h2>Floating IPs</h2>
         <button
           className="primary"
+          disabled={!providerReachable}
           onClick={() => onAction("Allocate floating IP", api.createFloatingIp)}
           type="button"
         >
@@ -733,6 +851,9 @@ function FloatingIpsPanel({ floatingIps, servers, onAction }) {
         className="inline-form"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!providerReachable) {
+            return;
+          }
           onAction("Attach floating IP", () => api.attachFloatingIp(selectedServer, selectedIp));
         }}
       >
@@ -756,7 +877,9 @@ function FloatingIpsPanel({ floatingIps, servers, onAction }) {
             </option>
           ))}
         </select>
-        <button type="submit">Attach</button>
+        <button disabled={!providerReachable} type="submit">
+          Attach
+        </button>
       </form>
 
       <ResourceTable
@@ -811,21 +934,26 @@ function ResourceTable({ title, columns, rows, emptyLabel }) {
 }
 
 function MetricCard({ label, value, helper, tone, loading }) {
+  const isUnavailable = value === "Unavailable";
   return (
     <div className={`metric-card ${tone}`}>
       <div className="metric-card-top">
         <span>{label}</span>
         <i aria-hidden="true" />
       </div>
-      {loading ? <div className="metric-skeleton" /> : <strong>{value}</strong>}
+      {loading ? (
+        <div className="metric-skeleton" />
+      ) : (
+        <strong className={isUnavailable ? "unavailable-value" : ""}>{value}</strong>
+      )}
       <p>{helper}</p>
     </div>
   );
 }
 
-function ActionButton({ busy, label, onClick }) {
+function ActionButton({ busy, disabled = false, label, onClick }) {
   return (
-    <button disabled={busy} onClick={onClick} type="button">
+    <button disabled={busy || disabled} onClick={onClick} type="button">
       {busy ? <span className="spinner small" /> : null}
       {busy ? "Working" : label}
     </button>
@@ -870,7 +998,7 @@ function Detail({ label, value }) {
   return (
     <>
       <dt>{label}</dt>
-      <dd>{value || "-"}</dd>
+      <dd>{value === null || value === undefined || value === "" ? "-" : value}</dd>
     </>
   );
 }
@@ -939,6 +1067,9 @@ function buildCatalogRequestDefaults(service) {
     lifetime_days: "30",
     packages: service.packages.join(", "),
     public_ip_required: service.public_ip_required,
+    estimated_monthly_cost: String(service.estimated_monthly_cost ?? ""),
+    risk_level: service.risk_level ?? "",
+    catalog_service_name: service.name ?? "",
   };
 }
 
@@ -970,15 +1101,107 @@ function buildVmRequestPayload(form) {
     payload.key_name = form.key_name.trim();
   }
 
+  if (form.catalog_service_name.trim()) {
+    payload.catalog_service_name = form.catalog_service_name.trim();
+  }
+
   return payload;
 }
 
+function getSubmissionMessage(result) {
+  if (!result?.id) {
+    return "VM request submitted";
+  }
+
+  return `VM request ${result.id} saved as ${formatDecision(result.status)}`;
+}
+
 function formatCurrency(value) {
+  if (!Number.isFinite(Number(value))) {
+    return "-";
+  }
+
   return new Intl.NumberFormat("en-IN", {
     currency: "INR",
     maximumFractionDigits: 0,
     style: "currency",
-  }).format(value);
+  }).format(Number(value));
+}
+
+function evaluateGovernancePreview(form) {
+  const cpu = Number(form.cpu || 0);
+  const ramGb = Number(form.ram_gb || 0);
+  const diskGb = Number(form.disk_gb || 0);
+  const environment = String(form.environment || "").toLowerCase();
+  const publicIpRequired = Boolean(form.public_ip_required);
+  const catalogCost = Number(form.estimated_monthly_cost);
+  const estimatedMonthlyCost = Number.isFinite(catalogCost) && catalogCost > 0
+    ? catalogCost
+    : cpu * 500 + ramGb * 150 + diskGb * 5;
+  const reasons = [];
+
+  const basicAutoApproved =
+    cpu <= 6 &&
+    ramGb <= 12 &&
+    diskGb <= 200 &&
+    environment !== "prod" &&
+    !publicIpRequired;
+
+  let score = 0;
+
+  if (estimatedMonthlyCost > 5000) {
+    score += 30;
+    reasons.push("Estimated monthly cost is greater than 5000");
+  }
+
+  if (publicIpRequired) {
+    score += 30;
+    reasons.push("Public IP requested");
+  }
+
+  if (environment === "prod") {
+    score += 20;
+    reasons.push("Production workload");
+  }
+
+  if (isCustomImage(form.image_id)) {
+    score += 15;
+    reasons.push("Custom image requested");
+  }
+
+  if (diskGb > 200) {
+    score += 20;
+    reasons.push("Disk size is greater than 200GB");
+  }
+
+  const governanceDecision =
+    score <= 30 ? "auto_provision" : score <= 60 ? "auto_provision_notify" : "approval_required";
+  const finalDecision =
+    basicAutoApproved && governanceDecision !== "approval_required"
+      ? "auto_approved"
+      : "approval_required";
+
+  if (!basicAutoApproved) {
+    reasons.push("Basic auto-approval policy was not satisfied");
+  }
+
+  return {
+    basicDecision: basicAutoApproved ? "auto_approved" : "approval_required",
+    estimatedMonthlyCost,
+    finalDecision,
+    governanceDecision,
+    reasons,
+    score,
+  };
+}
+
+function isCustomImage(imageId) {
+  const normalized = String(imageId || "").toLowerCase();
+  return normalized.startsWith("custom:") || normalized.includes("custom");
+}
+
+function formatDecision(value) {
+  return String(value || "-").replaceAll("_", " ");
 }
 
 function formatSize(size) {

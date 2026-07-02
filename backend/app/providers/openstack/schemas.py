@@ -160,6 +160,7 @@ class OpenStackVMRequest(BaseModel):
     lifetime_days: int = Field(..., ge=1)
     packages: list[str] = Field(default_factory=list)
     public_ip_required: bool = False
+    catalog_service_name: str | None = Field(default=None, min_length=1)
 
 
 class OpenStackRequestPolicyResult(BaseModel):
@@ -182,6 +183,7 @@ class OpenStackVMRequestRecord(BaseModel):
     policy: OpenStackRequestPolicyResult
     server: dict[str, Any] | None = None
     rejection_reason: str | None = None
+    provisioning_error: str | None = None
     created_at: str
     updated_at: str
 
@@ -192,6 +194,7 @@ class OpenStackVMRequestResponse(BaseModel):
     policy: OpenStackRequestPolicyResult
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest
+    provisioning_error: str | None = None
     created_at: str
     updated_at: str
 
