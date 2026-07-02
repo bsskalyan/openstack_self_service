@@ -149,8 +149,8 @@ class OpenStackService:
                     "id": server.id,
                     "name": server.name,
                     "status": getattr(server, "status", None),
-                    "flavor_id": self._extract_resource_id(getattr(server, "flavor", None)),
-                    "image_id": self._extract_resource_id(getattr(server, "image", None)),
+                    "flavor_id": self._extract_server_flavor_id(server),
+                    "image_id": self._extract_server_image_id(server),
                     "addresses": getattr(server, "addresses", None),
                     "project_id": getattr(server, "project_id", None),
                     "created_at": self._serialize_value(getattr(server, "created_at", None)),
@@ -162,6 +162,124 @@ class OpenStackService:
         except SDKException as exc:
             logger.exception("Failed to list OpenStack servers")
             raise OpenStackServiceError("Failed to list OpenStack servers") from exc
+
+    def create_server(
+        self,
+        *,
+        name: str,
+        image_id: str,
+        flavor_id: str,
+        network_id: str,
+        key_name: str | None = None,
+        security_group_id: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            image = connection.image.find_image(image_id, ignore_missing=False)
+            flavor = connection.compute.find_flavor(flavor_id, ignore_missing=False)
+            network = connection.network.find_network(network_id, ignore_missing=False)
+
+            server_payload: dict[str, Any] = {
+                "name": name,
+                "image_id": image.id,
+                "flavor_id": flavor.id,
+                "networks": [{"uuid": network.id}],
+            }
+
+            if key_name:
+                server_payload["key_name"] = key_name
+
+            if security_group_id:
+                security_group = connection.network.find_security_group(
+                    security_group_id,
+                    ignore_missing=False,
+                )
+                server_payload["security_groups"] = [{"name": security_group.name}]
+
+            logger.info(
+                "Creating OpenStack server name='%s', image_id='%s', flavor_id='%s', "
+                "network_id='%s'",
+                name,
+                image_id,
+                flavor_id,
+                network_id,
+            )
+            server = connection.compute.create_server(**server_payload)
+            logger.info("Created OpenStack server id='%s', name='%s'", server.id, server.name)
+            return self._serialize_server_summary(server)
+        except SDKException as exc:
+            logger.exception("Failed to create OpenStack server name='%s'", name)
+            raise OpenStackServiceError(
+                f"Failed to create OpenStack server: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def delete_server(self, server_id: str) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            logger.info("Deleting OpenStack server id='%s', name='%s'", server.id, server.name)
+            connection.compute.delete_server(server, ignore_missing=False)
+            return self._serialize_lifecycle_response(
+                server=server,
+                action="delete",
+                message="Server deletion requested.",
+            )
+        except SDKException as exc:
+            logger.exception("Failed to delete OpenStack server id='%s'", server_id)
+            raise OpenStackServiceError(
+                f"Failed to delete OpenStack server: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def start_server(self, server_id: str) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            logger.info("Starting OpenStack server id='%s', name='%s'", server.id, server.name)
+            connection.compute.start_server(server)
+            return self._serialize_lifecycle_response(
+                server=server,
+                action="start",
+                message="Server start requested.",
+            )
+        except SDKException as exc:
+            logger.exception("Failed to start OpenStack server id='%s'", server_id)
+            raise OpenStackServiceError(
+                f"Failed to start OpenStack server: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def stop_server(self, server_id: str) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            logger.info("Stopping OpenStack server id='%s', name='%s'", server.id, server.name)
+            connection.compute.stop_server(server)
+            return self._serialize_lifecycle_response(
+                server=server,
+                action="stop",
+                message="Server stop requested.",
+            )
+        except SDKException as exc:
+            logger.exception("Failed to stop OpenStack server id='%s'", server_id)
+            raise OpenStackServiceError(
+                f"Failed to stop OpenStack server: {self._format_openstack_error(exc)}",
+            ) from exc
+
+    def reboot_server(self, server_id: str) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            logger.info("Rebooting OpenStack server id='%s', name='%s'", server.id, server.name)
+            connection.compute.reboot_server(server, reboot_type="SOFT")
+            return self._serialize_lifecycle_response(
+                server=server,
+                action="reboot",
+                message="Server reboot requested.",
+            )
+        except SDKException as exc:
+            logger.exception("Failed to reboot OpenStack server id='%s'", server_id)
+            raise OpenStackServiceError(
+                f"Failed to reboot OpenStack server: {self._format_openstack_error(exc)}",
+            ) from exc
 
     def _create_connection(self) -> Connection:
         self._validate_configuration()
@@ -247,3 +365,45 @@ class OpenStackService:
             return value.isoformat()
 
         return value
+
+    @staticmethod
+    def _serialize_server_summary(server: Any) -> dict[str, Any]:
+        return {
+            "id": server.id,
+            "name": server.name,
+            "status": getattr(server, "status", None),
+            "addresses": getattr(server, "addresses", None),
+            "image_id": OpenStackService._extract_server_image_id(server),
+            "flavor_id": OpenStackService._extract_server_flavor_id(server),
+        }
+
+    @staticmethod
+    def _serialize_lifecycle_response(
+        *,
+        server: Any,
+        action: str,
+        message: str,
+    ) -> dict[str, Any]:
+        return {
+            "server_id": server.id,
+            "name": getattr(server, "name", None),
+            "action": action,
+            "status": getattr(server, "status", None),
+            "message": message,
+        }
+
+    @staticmethod
+    def _extract_server_image_id(server: Any) -> str | None:
+        return getattr(server, "image_id", None) or OpenStackService._extract_resource_id(
+            getattr(server, "image", None),
+        )
+
+    @staticmethod
+    def _extract_server_flavor_id(server: Any) -> str | None:
+        return getattr(server, "flavor_id", None) or OpenStackService._extract_resource_id(
+            getattr(server, "flavor", None),
+        )
+
+    @staticmethod
+    def _format_openstack_error(exc: SDKException) -> str:
+        return str(exc) or exc.__class__.__name__

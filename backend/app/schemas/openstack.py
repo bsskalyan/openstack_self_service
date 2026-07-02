@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OpenStackCloudInfo(BaseModel):
@@ -88,3 +88,29 @@ class OpenStackServerResponse(BaseModel):
     created_at: str | None
     updated_at: str | None
     vm_state: str | None
+
+
+class OpenStackCreateServerRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    image_id: str = Field(..., min_length=1)
+    flavor_id: str = Field(..., min_length=1)
+    network_id: str = Field(..., min_length=1)
+    key_name: str | None = Field(default=None, min_length=1)
+    security_group_id: str | None = Field(default=None, min_length=1)
+
+
+class OpenStackCreateServerResponse(BaseModel):
+    id: str
+    name: str | None
+    status: str | None
+    addresses: dict[str, Any] | None
+    image_id: str | None
+    flavor_id: str | None
+
+
+class OpenStackServerLifecycleResponse(BaseModel):
+    server_id: str
+    name: str | None
+    action: str
+    status: str | None
+    message: str

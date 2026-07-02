@@ -6,11 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import get_settings
 from app.schemas.openstack import (
+    OpenStackCreateServerRequest,
+    OpenStackCreateServerResponse,
     OpenStackFlavorResponse,
     OpenStackImageResponse,
     OpenStackKeypairResponse,
     OpenStackNetworkResponse,
     OpenStackSecurityGroupResponse,
+    OpenStackServerLifecycleResponse,
     OpenStackServerResponse,
     OpenStackStatusResponse,
 )
@@ -145,3 +148,85 @@ async def list_servers(
         return openstack_service.list_servers()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server listing", exc) from exc
+
+
+@router.post(
+    "/servers",
+    response_model=OpenStackCreateServerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_server(
+    request: OpenStackCreateServerRequest,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.create_server(
+            name=request.name,
+            image_id=request.image_id,
+            flavor_id=request.flavor_id,
+            network_id=request.network_id,
+            key_name=request.key_name,
+            security_group_id=request.security_group_id,
+        )
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server creation", exc) from exc
+
+
+@router.delete(
+    "/servers/{server_id}",
+    response_model=OpenStackServerLifecycleResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def delete_server(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.delete_server(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server deletion", exc) from exc
+
+
+@router.post(
+    "/servers/{server_id}/start",
+    response_model=OpenStackServerLifecycleResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_server(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.start_server(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server start", exc) from exc
+
+
+@router.post(
+    "/servers/{server_id}/stop",
+    response_model=OpenStackServerLifecycleResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def stop_server(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.stop_server(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server stop", exc) from exc
+
+
+@router.post(
+    "/servers/{server_id}/reboot",
+    response_model=OpenStackServerLifecycleResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reboot_server(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.reboot_server(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server reboot", exc) from exc
