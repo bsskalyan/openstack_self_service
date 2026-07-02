@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -26,3 +28,63 @@ class OpenStackImageResponse(BaseModel):
     size: int | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OpenStackFlavorResponse(BaseModel):
+    id: str
+    name: str | None
+    vcpus: int | None
+    ram: int | None
+    disk: int | None
+    ephemeral: int | None
+    swap: int | None
+    is_public: bool | None
+
+
+class OpenStackNetworkResponse(BaseModel):
+    id: str
+    name: str | None
+    status: str | None
+    admin_state_up: bool | None
+    is_shared: bool | None
+    is_router_external: bool | None
+    project_id: str | None
+
+
+class OpenStackSecurityGroupRuleResponse(BaseModel):
+    id: str | None
+    direction: str | None
+    ethertype: str | None
+    protocol: str | None
+    port_range_min: int | None
+    port_range_max: int | None
+    remote_ip_prefix: str | None
+    remote_group_id: str | None
+
+
+class OpenStackSecurityGroupResponse(BaseModel):
+    id: str
+    name: str | None
+    description: str | None
+    project_id: str | None
+    rules: list[OpenStackSecurityGroupRuleResponse]
+
+
+class OpenStackKeypairResponse(BaseModel):
+    name: str
+    type: str | None
+    fingerprint: str | None
+    public_key: str | None
+
+
+class OpenStackServerResponse(BaseModel):
+    id: str
+    name: str | None
+    status: str | None
+    flavor_id: str | None
+    image_id: str | None
+    addresses: dict[str, Any] | None
+    project_id: str | None
+    created_at: str | None
+    updated_at: str | None
+    vm_state: str | None

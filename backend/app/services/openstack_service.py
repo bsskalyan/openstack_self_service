@@ -71,33 +71,97 @@ class OpenStackService:
             logger.exception("Failed to list OpenStack images")
             raise OpenStackServiceError("Failed to list OpenStack images") from exc
 
-    def list_flavors(self) -> list[Any]:
+    def list_flavors(self) -> list[dict[str, Any]]:
         try:
-            return list(self.get_connection().compute.flavors())
+            return [
+                {
+                    "id": flavor.id,
+                    "name": flavor.name,
+                    "vcpus": getattr(flavor, "vcpus", None),
+                    "ram": getattr(flavor, "ram", None),
+                    "disk": getattr(flavor, "disk", None),
+                    "ephemeral": getattr(flavor, "ephemeral", None),
+                    "swap": getattr(flavor, "swap", None),
+                    "is_public": getattr(flavor, "is_public", None),
+                }
+                for flavor in self.get_connection().compute.flavors()
+            ]
         except SDKException as exc:
             logger.exception("Failed to list OpenStack flavors")
             raise OpenStackServiceError("Failed to list OpenStack flavors") from exc
 
-    def list_networks(self) -> list[Any]:
+    def list_networks(self) -> list[dict[str, Any]]:
         try:
-            return list(self.get_connection().network.networks())
+            return [
+                {
+                    "id": network.id,
+                    "name": network.name,
+                    "status": getattr(network, "status", None),
+                    "admin_state_up": getattr(network, "admin_state_up", None),
+                    "is_shared": getattr(network, "is_shared", None),
+                    "is_router_external": getattr(network, "is_router_external", None),
+                    "project_id": getattr(network, "project_id", None),
+                }
+                for network in self.get_connection().network.networks()
+            ]
         except SDKException as exc:
             logger.exception("Failed to list OpenStack networks")
             raise OpenStackServiceError("Failed to list OpenStack networks") from exc
 
-    def list_keypairs(self) -> list[Any]:
+    def list_keypairs(self) -> list[dict[str, Any]]:
         try:
-            return list(self.get_connection().compute.keypairs())
+            return [
+                {
+                    "name": keypair.name,
+                    "type": getattr(keypair, "type", None),
+                    "fingerprint": getattr(keypair, "fingerprint", None),
+                    "public_key": getattr(keypair, "public_key", None),
+                }
+                for keypair in self.get_connection().compute.keypairs()
+            ]
         except SDKException as exc:
             logger.exception("Failed to list OpenStack keypairs")
             raise OpenStackServiceError("Failed to list OpenStack keypairs") from exc
 
-    def list_security_groups(self) -> list[Any]:
+    def list_security_groups(self) -> list[dict[str, Any]]:
         try:
-            return list(self.get_connection().network.security_groups())
+            return [
+                {
+                    "id": security_group.id,
+                    "name": security_group.name,
+                    "description": getattr(security_group, "description", None),
+                    "project_id": getattr(security_group, "project_id", None),
+                    "rules": [
+                        self._serialize_security_group_rule(rule)
+                        for rule in getattr(security_group, "security_group_rules", [])
+                    ],
+                }
+                for security_group in self.get_connection().network.security_groups()
+            ]
         except SDKException as exc:
             logger.exception("Failed to list OpenStack security groups")
             raise OpenStackServiceError("Failed to list OpenStack security groups") from exc
+
+    def list_servers(self) -> list[dict[str, Any]]:
+        try:
+            return [
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "status": getattr(server, "status", None),
+                    "flavor_id": self._extract_resource_id(getattr(server, "flavor", None)),
+                    "image_id": self._extract_resource_id(getattr(server, "image", None)),
+                    "addresses": getattr(server, "addresses", None),
+                    "project_id": getattr(server, "project_id", None),
+                    "created_at": self._serialize_value(getattr(server, "created_at", None)),
+                    "updated_at": self._serialize_value(getattr(server, "updated_at", None)),
+                    "vm_state": getattr(server, "vm_state", None),
+                }
+                for server in self.get_connection().compute.servers(details=True)
+            ]
+        except SDKException as exc:
+            logger.exception("Failed to list OpenStack servers")
+            raise OpenStackServiceError("Failed to list OpenStack servers") from exc
 
     def _create_connection(self) -> Connection:
         self._validate_configuration()
@@ -143,3 +207,43 @@ class OpenStackService:
             message = f"Missing OpenStack configuration: {', '.join(missing_settings)}"
             logger.error(message)
             raise OpenStackConfigurationError(message)
+
+    @staticmethod
+    def _extract_resource_id(resource: Any) -> str | None:
+        if resource is None:
+            return None
+
+        if isinstance(resource, dict):
+            return resource.get("id")
+
+        return getattr(resource, "id", None)
+
+    @staticmethod
+    def _serialize_security_group_rule(rule: Any) -> dict[str, Any]:
+        return {
+            "id": OpenStackService._get_resource_field(rule, "id"),
+            "direction": OpenStackService._get_resource_field(rule, "direction"),
+            "ethertype": OpenStackService._get_resource_field(rule, "ethertype"),
+            "protocol": OpenStackService._get_resource_field(rule, "protocol"),
+            "port_range_min": OpenStackService._get_resource_field(rule, "port_range_min"),
+            "port_range_max": OpenStackService._get_resource_field(rule, "port_range_max"),
+            "remote_ip_prefix": OpenStackService._get_resource_field(
+                rule,
+                "remote_ip_prefix",
+            ),
+            "remote_group_id": OpenStackService._get_resource_field(rule, "remote_group_id"),
+        }
+
+    @staticmethod
+    def _get_resource_field(resource: Any, field_name: str) -> Any:
+        if isinstance(resource, dict):
+            return resource.get(field_name)
+
+        return getattr(resource, field_name, None)
+
+    @staticmethod
+    def _serialize_value(value: Any) -> Any:
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+
+        return value
