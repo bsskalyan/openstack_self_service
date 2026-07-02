@@ -17,13 +17,18 @@ from app.providers.openstack.schemas import (
     OpenStackKeypairResponse,
     OpenStackNetworkResponse,
     OpenStackRebootServerRequest,
+    OpenStackRejectRequest,
     OpenStackSecurityGroupResponse,
     OpenStackServerLifecycleResponse,
     OpenStackServerResponse,
     OpenStackStatusResponse,
+    OpenStackVMRequest,
+    OpenStackVMRequestRecord,
+    OpenStackVMRequestResponse,
 )
 from app.providers.openstack.service import (
     OpenStackConfigurationError,
+    OpenStackRequestNotFoundError,
     OpenStackService,
     OpenStackServiceError,
 )
@@ -41,6 +46,13 @@ def get_openstack_service() -> OpenStackService:
 
 
 def handle_openstack_error(operation: str, exc: OpenStackServiceError) -> HTTPException:
+    if isinstance(exc, OpenStackRequestNotFoundError):
+        logger.warning("%s failed because the request was not found: %s", operation, exc)
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
     if isinstance(exc, OpenStackConfigurationError):
         logger.warning("%s failed due to OpenStack configuration: %s", operation, exc)
         return HTTPException(
@@ -170,6 +182,63 @@ async def create_floating_ip(
         )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack floating IP creation", exc) from exc
+
+
+@router.post(
+    "/requests",
+    response_model=OpenStackVMRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_vm_request(
+    request: OpenStackVMRequest,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.submit_vm_request(request)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack VM request submission", exc) from exc
+
+
+@router.get(
+    "/requests",
+    response_model=list[OpenStackVMRequestRecord],
+    status_code=status.HTTP_200_OK,
+)
+async def list_vm_requests(
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> list[dict[str, Any]]:
+    return openstack_service.list_vm_requests()
+
+
+@router.post(
+    "/requests/{request_id}/approve",
+    response_model=OpenStackVMRequestRecord,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def approve_vm_request(
+    request_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> dict[str, Any]:
+    try:
+        return openstack_service.approve_vm_request(request_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack VM request approval", exc) from exc
+
+
+@router.post(
+    "/requests/{request_id}/reject",
+    response_model=OpenStackVMRequestRecord,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reject_vm_request(
+    request_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    request: OpenStackRejectRequest | None = Body(default=None),
+) -> dict[str, Any]:
+    try:
+        return openstack_service.reject_vm_request(request_id, request)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack VM request rejection", exc) from exc
 
 
 @router.get(

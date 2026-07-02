@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -142,3 +142,59 @@ class OpenStackFloatingIPActionResponse(BaseModel):
     floating_ip: str
     action: str
     status: str
+
+
+class OpenStackVMRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    image_id: str = Field(..., min_length=1)
+    flavor_id: str = Field(..., min_length=1)
+    network_id: str = Field(..., min_length=1)
+    security_group_id: str | None = Field(default=None, min_length=1)
+    key_name: str | None = Field(default=None, min_length=1)
+    cpu: int = Field(..., ge=1)
+    ram_gb: int = Field(..., ge=1)
+    disk_gb: int = Field(..., ge=1)
+    environment: str = Field(..., min_length=1)
+    app_tag: str = Field(..., min_length=1)
+    cost_center: str = Field(..., min_length=1)
+    lifetime_days: int = Field(..., ge=1)
+    packages: list[str] = Field(default_factory=list)
+    public_ip_required: bool = False
+
+
+class OpenStackRequestPolicyResult(BaseModel):
+    basic_policy_decision: Literal["auto_approved", "approval_required"]
+    governance_decision: Literal[
+        "auto_provision",
+        "auto_provision_notify",
+        "approval_required",
+    ]
+    final_decision: Literal["auto_approved", "approval_required"]
+    governance_score: int
+    estimated_monthly_cost: float
+    reasons: list[str]
+
+
+class OpenStackVMRequestRecord(BaseModel):
+    id: str
+    status: str
+    request: OpenStackVMRequest
+    policy: OpenStackRequestPolicyResult
+    server: dict[str, Any] | None = None
+    rejection_reason: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class OpenStackVMRequestResponse(BaseModel):
+    id: str
+    status: str
+    policy: OpenStackRequestPolicyResult
+    server: dict[str, Any] | None = None
+    request: OpenStackVMRequest
+    created_at: str
+    updated_at: str
+
+
+class OpenStackRejectRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

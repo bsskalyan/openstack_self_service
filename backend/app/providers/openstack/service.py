@@ -1,11 +1,16 @@
 import logging
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import openstack
 from openstack.connection import Connection
 from openstack.exceptions import SDKException
 
 from app.core.config import Settings
+from app.providers.openstack.policy import evaluate_vm_request
+from app.providers.openstack.request_store import OpenStackRequestStore
+from app.providers.openstack.schemas import OpenStackRejectRequest, OpenStackVMRequest
 
 
 logger = logging.getLogger(__name__)
@@ -19,10 +24,15 @@ class OpenStackConfigurationError(OpenStackServiceError):
     """Raised when required OpenStack configuration is missing."""
 
 
+class OpenStackRequestNotFoundError(OpenStackServiceError):
+    """Raised when a stored request cannot be found."""
+
+
 class OpenStackService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._connection: Connection | None = None
+        self._request_store = OpenStackRequestStore()
 
     def get_connection(self) -> Connection:
         if self._connection is None:
@@ -249,6 +259,104 @@ class OpenStackService:
                 f"Failed to create OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
+    def submit_vm_request(self, request: OpenStackVMRequest) -> dict[str, Any]:
+        policy_result = evaluate_vm_request(request)
+        request_id = str(uuid4())
+        now = self._now()
+
+        if policy_result.final_decision == "approval_required":
+            record = self._build_request_record(
+                request_id=request_id,
+                request=request,
+                policy_result=policy_result,
+                status="approval_required",
+                created_at=now,
+                updated_at=now,
+            )
+            logger.info(
+                "VM request id='%s' requires approval, score='%s'",
+                request_id,
+                policy_result.governance_score,
+            )
+            return self._request_store.save_request(record)
+
+        server = self.create_server(
+            name=request.name,
+            image_id=request.image_id,
+            flavor_id=request.flavor_id,
+            network_id=request.network_id,
+            key_name=request.key_name,
+            security_group_id=request.security_group_id,
+        )
+        status = (
+            "provisioned_notify"
+            if policy_result.governance_decision == "auto_provision_notify"
+            else "provisioned"
+        )
+        record = self._build_request_record(
+            request_id=request_id,
+            request=request,
+            policy_result=policy_result,
+            status=status,
+            created_at=now,
+            updated_at=self._now(),
+            server=server,
+        )
+        logger.info("Auto-provisioned VM request id='%s', status='%s'", request_id, status)
+        return self._request_store.save_request(record)
+
+    def list_vm_requests(self) -> list[dict[str, Any]]:
+        return self._request_store.list_requests()
+
+    def approve_vm_request(self, request_id: str) -> dict[str, Any]:
+        record = self._get_request_or_raise(request_id)
+        if record["status"] != "approval_required":
+            raise OpenStackServiceError(
+                f"Request '{request_id}' cannot be approved from status '{record['status']}'",
+            )
+
+        request = OpenStackVMRequest(**record["request"])
+        server = self.create_server(
+            name=request.name,
+            image_id=request.image_id,
+            flavor_id=request.flavor_id,
+            network_id=request.network_id,
+            key_name=request.key_name,
+            security_group_id=request.security_group_id,
+        )
+        updated = self._request_store.update_request(
+            request_id,
+            {
+                "status": "approved",
+                "server": server,
+                "updated_at": self._now(),
+            },
+        )
+        logger.info("Approved and provisioned VM request id='%s'", request_id)
+        return updated or record
+
+    def reject_vm_request(
+        self,
+        request_id: str,
+        request: OpenStackRejectRequest | None = None,
+    ) -> dict[str, Any]:
+        record = self._get_request_or_raise(request_id)
+        if record["status"] != "approval_required":
+            raise OpenStackServiceError(
+                f"Request '{request_id}' cannot be rejected from status '{record['status']}'",
+            )
+
+        updated = self._request_store.update_request(
+            request_id,
+            {
+                "status": "rejected",
+                "rejection_reason": request.reason if request else None,
+                "updated_at": self._now(),
+            },
+        )
+        logger.info("Rejected VM request id='%s'", request_id)
+        return updated or record
+
     def delete_server(self, server_id: str) -> dict[str, Any]:
         try:
             connection = self.get_connection()
@@ -425,6 +533,39 @@ class OpenStackService:
             message = f"Missing OpenStack configuration: {', '.join(missing_settings)}"
             logger.error(message)
             raise OpenStackConfigurationError(message)
+
+    def _get_request_or_raise(self, request_id: str) -> dict[str, Any]:
+        record = self._request_store.get_request(request_id)
+        if not record:
+            raise OpenStackRequestNotFoundError(f"Request '{request_id}' was not found")
+
+        return record
+
+    @staticmethod
+    def _build_request_record(
+        *,
+        request_id: str,
+        request: OpenStackVMRequest,
+        policy_result: Any,
+        status: str,
+        created_at: str,
+        updated_at: str,
+        server: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": request_id,
+            "status": status,
+            "request": request.model_dump(),
+            "policy": policy_result.model_dump(),
+            "server": server,
+            "rejection_reason": None,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(UTC).isoformat()
 
     @staticmethod
     def _extract_resource_id(resource: Any) -> str | None:
