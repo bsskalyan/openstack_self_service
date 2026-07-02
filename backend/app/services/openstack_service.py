@@ -222,7 +222,6 @@ class OpenStackService:
             return self._serialize_lifecycle_response(
                 server=server,
                 action="delete",
-                message="Server deletion requested.",
             )
         except SDKException as exc:
             logger.exception("Failed to delete OpenStack server id='%s'", server_id)
@@ -239,7 +238,6 @@ class OpenStackService:
             return self._serialize_lifecycle_response(
                 server=server,
                 action="start",
-                message="Server start requested.",
             )
         except SDKException as exc:
             logger.exception("Failed to start OpenStack server id='%s'", server_id)
@@ -256,7 +254,6 @@ class OpenStackService:
             return self._serialize_lifecycle_response(
                 server=server,
                 action="stop",
-                message="Server stop requested.",
             )
         except SDKException as exc:
             logger.exception("Failed to stop OpenStack server id='%s'", server_id)
@@ -273,7 +270,6 @@ class OpenStackService:
             return self._serialize_lifecycle_response(
                 server=server,
                 action="reboot",
-                message="Server reboot requested.",
             )
         except SDKException as exc:
             logger.exception("Failed to reboot OpenStack server id='%s'", server_id)
@@ -382,14 +378,11 @@ class OpenStackService:
         *,
         server: Any,
         action: str,
-        message: str,
     ) -> dict[str, Any]:
         return {
-            "server_id": server.id,
-            "name": getattr(server, "name", None),
+            "id": server.id,
             "action": action,
-            "status": getattr(server, "status", None),
-            "message": message,
+            "status": "accepted",
         }
 
     @staticmethod

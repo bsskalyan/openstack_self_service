@@ -109,8 +109,6 @@ class OpenStackCreateServerResponse(BaseModel):
 
 
 class OpenStackServerLifecycleResponse(BaseModel):
-    server_id: str
-    name: str | None
+    id: str
     action: str
-    status: str | None
-    message: str
+    status: str
