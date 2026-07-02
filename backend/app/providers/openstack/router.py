@@ -16,6 +16,7 @@ from app.providers.openstack.schemas import (
     OpenStackImageResponse,
     OpenStackKeypairResponse,
     OpenStackNetworkResponse,
+    OpenStackRebootServerRequest,
     OpenStackSecurityGroupResponse,
     OpenStackServerLifecycleResponse,
     OpenStackServerResponse,
@@ -260,9 +261,13 @@ async def stop_server(
 async def reboot_server(
     server_id: str,
     openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    request: OpenStackRebootServerRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     try:
-        return openstack_service.reboot_server(server_id)
+        return openstack_service.reboot_server(
+            server_id,
+            reboot_type=request.reboot_type if request else "SOFT",
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server reboot", exc) from exc
 

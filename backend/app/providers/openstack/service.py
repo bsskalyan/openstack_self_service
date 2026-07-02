@@ -297,15 +297,21 @@ class OpenStackService:
                 f"Failed to stop OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
-    def reboot_server(self, server_id: str) -> dict[str, Any]:
+    def reboot_server(self, server_id: str, reboot_type: str = "SOFT") -> dict[str, Any]:
         try:
             connection = self.get_connection()
             server = connection.compute.get_server(server_id)
-            logger.info("Rebooting OpenStack server id='%s', name='%s'", server.id, server.name)
-            connection.compute.reboot_server(server, reboot_type="SOFT")
+            normalized_reboot_type = reboot_type.upper()
+            logger.info(
+                "Rebooting OpenStack server id='%s', name='%s', type='%s'",
+                server.id,
+                server.name,
+                normalized_reboot_type,
+            )
+            connection.compute.reboot_server(server, reboot_type=normalized_reboot_type)
             return self._serialize_lifecycle_response(
                 server=server,
-                action="reboot",
+                action=f"{normalized_reboot_type.lower()}-reboot",
             )
         except SDKException as exc:
             logger.exception("Failed to reboot OpenStack server id='%s'", server_id)

@@ -114,6 +114,10 @@ class OpenStackServerLifecycleResponse(BaseModel):
     status: str
 
 
+class OpenStackRebootServerRequest(BaseModel):
+    reboot_type: str = Field(default="SOFT", pattern="^(SOFT|HARD)$")
+
+
 class OpenStackFloatingIPResponse(BaseModel):
     id: str
     floating_ip_address: str | None
