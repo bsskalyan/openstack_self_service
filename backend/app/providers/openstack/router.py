@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from app.core.config import get_settings
-from app.schemas.openstack import (
+from app.providers.openstack.schemas import (
     OpenStackCreateServerRequest,
     OpenStackCreateServerResponse,
     OpenStackAttachFloatingIPRequest,
@@ -21,7 +21,7 @@ from app.schemas.openstack import (
     OpenStackServerResponse,
     OpenStackStatusResponse,
 )
-from app.services.openstack_service import (
+from app.providers.openstack.service import (
     OpenStackConfigurationError,
     OpenStackService,
     OpenStackServiceError,
