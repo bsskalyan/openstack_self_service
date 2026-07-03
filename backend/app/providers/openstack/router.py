@@ -26,6 +26,7 @@ from app.providers.openstack.schemas import (
     OpenStackVMRequestRecord,
     OpenStackVMRequestResponse,
 )
+from app.providers.openstack.provider import OpenStackProvider
 from app.providers.openstack.service import (
     OpenStackConfigurationError,
     OpenStackRequestNotFoundError,
@@ -43,6 +44,11 @@ router = APIRouter()
 @lru_cache
 def get_openstack_service() -> OpenStackService:
     return OpenStackService(get_settings())
+
+
+@lru_cache
+def get_openstack_provider() -> OpenStackProvider:
+    return OpenStackProvider(get_openstack_service())
 
 
 def handle_openstack_error(operation: str, exc: OpenStackServiceError) -> HTTPException:
@@ -73,10 +79,10 @@ def handle_openstack_error(operation: str, exc: OpenStackServiceError) -> HTTPEx
     status_code=status.HTTP_200_OK,
 )
 async def get_openstack_module_status(
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> dict[str, Any]:
     try:
-        cloud_info = openstack_service.verify_authentication()
+        cloud_info = openstack_provider.status()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack status check", exc) from exc
 
@@ -89,10 +95,10 @@ async def get_openstack_module_status(
     status_code=status.HTTP_200_OK,
 )
 async def list_images(
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> list[dict[str, Any]]:
     try:
-        return openstack_service.list_images()
+        return openstack_provider.list_images()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack image listing", exc) from exc
 
@@ -103,10 +109,10 @@ async def list_images(
     status_code=status.HTTP_200_OK,
 )
 async def list_flavors(
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> list[dict[str, Any]]:
     try:
-        return openstack_service.list_flavors()
+        return openstack_provider.list_flavors()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack flavor listing", exc) from exc
 
@@ -117,10 +123,10 @@ async def list_flavors(
     status_code=status.HTTP_200_OK,
 )
 async def list_networks(
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> list[dict[str, Any]]:
     try:
-        return openstack_service.list_networks()
+        return openstack_provider.list_networks()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack network listing", exc) from exc
 
@@ -273,10 +279,10 @@ async def reject_vm_request(
     status_code=status.HTTP_200_OK,
 )
 async def list_servers(
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> list[dict[str, Any]]:
     try:
-        return openstack_service.list_servers()
+        return openstack_provider.list_servers()
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server listing", exc) from exc
 
@@ -288,10 +294,10 @@ async def list_servers(
 )
 async def create_server(
     request: OpenStackCreateServerRequest,
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> dict[str, Any]:
     try:
-        return openstack_service.create_server(
+        return openstack_provider.create_server(
             name=request.name,
             image_id=request.image_id,
             flavor_id=request.flavor_id,
@@ -310,10 +316,10 @@ async def create_server(
 )
 async def delete_server(
     server_id: str,
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> dict[str, Any]:
     try:
-        return openstack_service.delete_server(server_id)
+        return openstack_provider.delete_server(server_id)
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server deletion", exc) from exc
 
@@ -325,10 +331,10 @@ async def delete_server(
 )
 async def start_server(
     server_id: str,
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> dict[str, Any]:
     try:
-        return openstack_service.start_server(server_id)
+        return openstack_provider.start_server(server_id)
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server start", exc) from exc
 
@@ -340,10 +346,10 @@ async def start_server(
 )
 async def stop_server(
     server_id: str,
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
 ) -> dict[str, Any]:
     try:
-        return openstack_service.stop_server(server_id)
+        return openstack_provider.stop_server(server_id)
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server stop", exc) from exc
 
@@ -355,11 +361,11 @@ async def stop_server(
 )
 async def reboot_server(
     server_id: str,
-    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    openstack_provider: Annotated[OpenStackProvider, Depends(get_openstack_provider)],
     request: OpenStackRebootServerRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     try:
-        return openstack_service.reboot_server(
+        return openstack_provider.reboot_server(
             server_id,
             reboot_type=request.reboot_type if request else "SOFT",
         )
