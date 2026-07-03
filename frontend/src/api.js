@@ -1,9 +1,20 @@
 const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 
+let currentUser = {
+  name: "Asha Engineer",
+  role: "engineer",
+};
+
+export function setApiUser(user) {
+  currentUser = user;
+}
+
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      "X-User-Name": currentUser.name,
+      "X-User-Role": currentUser.role,
       ...(options.headers ?? {}),
     },
     ...options,

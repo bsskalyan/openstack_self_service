@@ -88,6 +88,7 @@ class OpenStackServerResponse(BaseModel):
     created_at: str | None
     updated_at: str | None
     vm_state: str | None
+    metadata: dict[str, Any] | None = None
 
 
 class OpenStackCreateServerRequest(BaseModel):
@@ -106,6 +107,7 @@ class OpenStackCreateServerResponse(BaseModel):
     addresses: dict[str, Any] | None
     image_id: str | None
     flavor_id: str | None
+    metadata: dict[str, Any] | None = None
 
 
 class OpenStackServerLifecycleResponse(BaseModel):
@@ -187,6 +189,8 @@ class OpenStackRequestActivity(BaseModel):
 class OpenStackVMRequestRecord(BaseModel):
     id: str
     status: str
+    owner: str | None = None
+    owner_role: str | None = None
     request: OpenStackVMRequest
     policy: OpenStackRequestPolicyResult
     server: dict[str, Any] | None = None
@@ -200,6 +204,8 @@ class OpenStackVMRequestRecord(BaseModel):
 class OpenStackVMRequestResponse(BaseModel):
     id: str
     status: str
+    owner: str | None = None
+    owner_role: str | None = None
     policy: OpenStackRequestPolicyResult
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest

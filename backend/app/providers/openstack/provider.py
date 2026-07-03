@@ -39,6 +39,7 @@ class OpenStackProvider(CloudProvider):
         network_id: str,
         key_name: str | None = None,
         security_group_id: str | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return self._service.create_server(
             name=name,
@@ -47,6 +48,7 @@ class OpenStackProvider(CloudProvider):
             network_id=network_id,
             key_name=key_name,
             security_group_id=security_group_id,
+            metadata=metadata,
         )
 
     def start_server(self, server_id: str) -> dict[str, Any]:

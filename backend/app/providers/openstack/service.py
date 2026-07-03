@@ -166,6 +166,7 @@ class OpenStackService:
                     "created_at": self._serialize_value(getattr(server, "created_at", None)),
                     "updated_at": self._serialize_value(getattr(server, "updated_at", None)),
                     "vm_state": getattr(server, "vm_state", None),
+                    "metadata": getattr(server, "metadata", None),
                 }
                 for server in self.get_connection().compute.servers(details=True)
             ]
@@ -218,6 +219,7 @@ class OpenStackService:
         network_id: str,
         key_name: str | None = None,
         security_group_id: str | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
             connection = self.get_connection()
@@ -234,6 +236,9 @@ class OpenStackService:
 
             if key_name:
                 server_payload["key_name"] = key_name
+
+            if metadata:
+                server_payload["metadata"] = metadata
 
             if security_group_id:
                 security_group = connection.network.find_security_group(
@@ -259,7 +264,13 @@ class OpenStackService:
                 f"Failed to create OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
-    def submit_vm_request(self, request: OpenStackVMRequest) -> dict[str, Any]:
+    def submit_vm_request(
+        self,
+        request: OpenStackVMRequest,
+        *,
+        owner: str | None = None,
+        owner_role: str | None = None,
+    ) -> dict[str, Any]:
         policy_result = evaluate_vm_request(request)
         request_id = str(uuid4())
         now = self._now()
@@ -270,6 +281,8 @@ class OpenStackService:
                 request=request,
                 policy_result=policy_result,
                 status="approval_required",
+                owner=owner,
+                owner_role=owner_role,
                 created_at=now,
                 updated_at=now,
                 activity_log=[
@@ -296,6 +309,12 @@ class OpenStackService:
                 network_id=request.network_id,
                 key_name=request.key_name,
                 security_group_id=request.security_group_id,
+                metadata=self._build_server_metadata(
+                    owner=owner,
+                    owner_role=owner_role,
+                    app_tag=request.app_tag,
+                    request_id=request_id,
+                ),
             )
         except OpenStackServiceError as exc:
             record = self._build_request_record(
@@ -303,6 +322,8 @@ class OpenStackService:
                 request=request,
                 policy_result=policy_result,
                 status="draft",
+                owner=owner,
+                owner_role=owner_role,
                 created_at=now,
                 updated_at=self._now(),
                 provisioning_error=str(exc),
@@ -338,6 +359,8 @@ class OpenStackService:
             request=request,
             policy_result=policy_result,
             status=status,
+            owner=owner,
+            owner_role=owner_role,
             created_at=now,
             updated_at=self._now(),
             server=server,
@@ -372,7 +395,7 @@ class OpenStackService:
     def get_vm_request(self, request_id: str) -> dict[str, Any]:
         return self._get_request_or_raise(request_id)
 
-    def approve_vm_request(self, request_id: str) -> dict[str, Any]:
+    def approve_vm_request(self, request_id: str, *, actor: str = "admin") -> dict[str, Any]:
         record = self._get_request_or_raise(request_id)
         if record["status"] != "approval_required":
             raise OpenStackServiceError(
@@ -387,6 +410,12 @@ class OpenStackService:
             network_id=request.network_id,
             key_name=request.key_name,
             security_group_id=request.security_group_id,
+            metadata=self._build_server_metadata(
+                owner=record.get("owner"),
+                owner_role=record.get("owner_role"),
+                app_tag=request.app_tag,
+                request_id=request_id,
+            ),
         )
         updated = self._request_store.update_request(
             request_id,
@@ -399,6 +428,7 @@ class OpenStackService:
                     action="approved",
                     status="approved",
                     message=f"Request approved and VM provisioned with server id '{server.get('id')}'",
+                    actor=actor,
                 ),
             },
         )
@@ -409,6 +439,8 @@ class OpenStackService:
         self,
         request_id: str,
         request: OpenStackRejectRequest | None = None,
+        *,
+        actor: str = "admin",
     ) -> dict[str, Any]:
         record = self._get_request_or_raise(request_id)
         if record["status"] != "approval_required":
@@ -429,7 +461,7 @@ class OpenStackService:
                     message=request.reason
                     if request and request.reason
                     else "Request rejected without a reason",
-                    actor="admin",
+                    actor=actor,
                 ),
             },
         )
@@ -629,6 +661,8 @@ class OpenStackService:
         status: str,
         created_at: str,
         updated_at: str,
+        owner: str | None = None,
+        owner_role: str | None = None,
         server: dict[str, Any] | None = None,
         provisioning_error: str | None = None,
         activity_log: list[dict[str, Any]] | None = None,
@@ -636,6 +670,8 @@ class OpenStackService:
         return {
             "id": request_id,
             "status": status,
+            "owner": owner,
+            "owner_role": owner_role,
             "request": request.model_dump(),
             "policy": policy_result.model_dump(),
             "server": server,
@@ -736,7 +772,30 @@ class OpenStackService:
             "addresses": getattr(server, "addresses", None),
             "image_id": OpenStackService._extract_server_image_id(server),
             "flavor_id": OpenStackService._extract_server_flavor_id(server),
+            "metadata": getattr(server, "metadata", None),
         }
+
+    @staticmethod
+    def _build_server_metadata(
+        *,
+        owner: str | None,
+        owner_role: str | None,
+        app_tag: str | None,
+        request_id: str | None = None,
+    ) -> dict[str, str]:
+        metadata = {
+            "managed_by": "openstack-self-service",
+        }
+        if owner:
+            metadata["owner"] = owner
+        if owner_role:
+            metadata["owner_role"] = owner_role
+        if app_tag:
+            metadata["app_tag"] = app_tag
+        if request_id:
+            metadata["request_id"] = request_id
+
+        return metadata
 
     @staticmethod
     def _serialize_lifecycle_response(

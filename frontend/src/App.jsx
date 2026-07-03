@@ -1,18 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-import { api } from "./api";
+import { api, setApiUser } from "./api";
+
+const mockUsers = [
+  { id: "engineer", name: "Asha Engineer", role: "engineer", label: "Engineer" },
+  { id: "admin", name: "Morgan Admin", role: "admin", label: "Admin" },
+  { id: "viewer", name: "Vik Viewer", role: "viewer", label: "Viewer" },
+];
 
 const tabs = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "catalog", label: "Service Catalog" },
-  { id: "requests", label: "My Requests" },
-  { id: "admin", label: "Admin" },
-  { id: "servers", label: "Servers" },
-  { id: "create", label: "Create VM" },
-  { id: "images", label: "Images" },
-  { id: "flavors", label: "Flavors" },
-  { id: "networks", label: "Networks" },
-  { id: "floatingIps", label: "Floating IPs" },
+  { id: "dashboard", label: "Dashboard", roles: ["engineer", "admin", "viewer"] },
+  { id: "catalog", label: "Service Catalog", roles: ["engineer", "admin", "viewer"] },
+  { id: "requests", label: "My Requests", roles: ["engineer", "admin"] },
+  { id: "admin", label: "Admin", roles: ["admin"] },
+  { id: "servers", label: "Servers", roles: ["engineer", "admin", "viewer"] },
+  { id: "create", label: "Create VM", roles: ["engineer", "admin"] },
+  { id: "images", label: "Images", roles: ["engineer", "admin", "viewer"] },
+  { id: "flavors", label: "Flavors", roles: ["engineer", "admin", "viewer"] },
+  { id: "networks", label: "Networks", roles: ["engineer", "admin", "viewer"] },
+  { id: "floatingIps", label: "Floating IPs", roles: ["engineer", "admin", "viewer"] },
 ];
 
 const emptyCreateForm = {
@@ -36,7 +42,7 @@ const emptyCreateForm = {
   catalog_service_name: "",
 };
 
-function useOpenStackData() {
+function useOpenStackData(currentUser) {
   const [data, setData] = useState({
     status: null,
     servers: [],
@@ -55,6 +61,7 @@ function useOpenStackData() {
   const [providerReachable, setProviderReachable] = useState(true);
 
   async function refresh() {
+    setApiUser(currentUser);
     setLoading(true);
     setError("");
 
@@ -69,20 +76,29 @@ function useOpenStackData() {
       ["floatingIps", api.listFloatingIps()],
     ];
 
+    const vmRequestsPromise =
+      currentUser.role === "viewer"
+        ? Promise.resolve({ status: "fulfilled", value: [] })
+        : api.listVmRequests().then(
+            (value) => ({ status: "fulfilled", value }),
+            (reason) => ({ status: "rejected", reason }),
+          );
+    const pendingRequestsPromise =
+      currentUser.role === "admin"
+        ? api.listPendingVmRequests().then(
+            (value) => ({ status: "fulfilled", value }),
+            (reason) => ({ status: "rejected", reason }),
+          )
+        : Promise.resolve({ status: "fulfilled", value: [] });
+
     const [openStackResults, catalogResult, vmRequestsResult, pendingRequestsResult] = await Promise.all([
       Promise.allSettled(openStackRequests.map(([, request]) => request)),
       api.listCatalogServices().then(
         (value) => ({ status: "fulfilled", value }),
         (reason) => ({ status: "rejected", reason }),
       ),
-      api.listVmRequests().then(
-        (value) => ({ status: "fulfilled", value }),
-        (reason) => ({ status: "rejected", reason }),
-      ),
-      api.listPendingVmRequests().then(
-        (value) => ({ status: "fulfilled", value }),
-        (reason) => ({ status: "rejected", reason }),
-      ),
+      vmRequestsPromise,
+      pendingRequestsPromise,
     ]);
 
     const nextData = {
@@ -135,7 +151,7 @@ function useOpenStackData() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [currentUser.name, currentUser.role]);
 
   return { data, loading, error, providerReachable, setError, refresh };
 }
@@ -147,7 +163,10 @@ export default function App() {
   const [providers, setProviders] = useState([]);
   const [selectedProviderId, setSelectedProviderId] = useState("openstack");
   const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
-  const { data, loading, error, providerReachable, setError, refresh } = useOpenStackData();
+  const [currentUser, setCurrentUser] = useState(mockUsers[0]);
+  const { data, loading, error, providerReachable, setError, refresh } =
+    useOpenStackData(currentUser);
+  const activeTabAllowed = canAccessTab(activeTab, currentUser.role);
   const selectedProvider =
     providers.find((provider) => provider.id === selectedProviderId) ??
     providers.find((provider) => provider.id === "openstack") ?? {
@@ -157,6 +176,14 @@ export default function App() {
       enabled: true,
       description: "OpenStack cloud provider",
     };
+
+  useEffect(() => {
+    setApiUser(currentUser);
+    if (!canAccessTab(activeTab, currentUser.role)) {
+      setActiveTab("dashboard");
+      setNotice("Not authorized for that section with the selected role.");
+    }
+  }, [activeTab, currentUser]);
 
   useEffect(() => {
     api.listProviders().then(
@@ -202,16 +229,18 @@ export default function App() {
         </div>
 
         <nav className="nav-tabs" aria-label="Portal sections">
-          {tabs.map((tab) => (
-            <button
-              className={activeTab === tab.id ? "active" : ""}
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs
+            .filter((tab) => tab.roles.includes(currentUser.role))
+            .map((tab) => (
+              <button
+                className={activeTab === tab.id ? "active" : ""}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
         </nav>
       </aside>
 
@@ -227,6 +256,7 @@ export default function App() {
               selectedProviderId={selectedProviderId}
               onChange={setSelectedProviderId}
             />
+            <UserSelector currentUser={currentUser} onChange={setCurrentUser} />
             <button className="primary" disabled={loading} onClick={refresh} type="button">
               {loading ? "Refreshing..." : "Refresh"}
             </button>
@@ -239,7 +269,9 @@ export default function App() {
         {error && <div className="alert error">{error}</div>}
         {notice && <div className="alert success">{notice}</div>}
 
-        {activeTab === "dashboard" && (
+        {!activeTabAllowed && <NotAuthorized role={currentUser.role} />}
+
+        {activeTabAllowed && activeTab === "dashboard" && (
           <Dashboard
             data={data}
             loading={loading}
@@ -247,8 +279,9 @@ export default function App() {
             selectedProvider={selectedProvider}
           />
         )}
-        {activeTab === "catalog" && (
+        {activeTabAllowed && activeTab === "catalog" && (
           <ServiceCatalog
+            currentUser={currentUser}
             loading={loading}
             onRequest={(service) => {
               setRequestDefaults(buildCatalogRequestDefaults(service));
@@ -259,15 +292,16 @@ export default function App() {
             services={data.catalogServices}
           />
         )}
-        {activeTab === "requests" && (
+        {activeTabAllowed && activeTab === "requests" && (
           <MyRequestsPage
+            currentUser={currentUser}
             loading={loading}
             onError={setError}
             requests={data.vmRequests}
             selectedProvider={selectedProvider}
           />
         )}
-        {activeTab === "admin" && (
+        {activeTabAllowed && activeTab === "admin" && (
           <AdminApprovalDashboard
             loading={loading}
             onError={setError}
@@ -277,17 +311,20 @@ export default function App() {
             selectedProvider={selectedProvider}
           />
         )}
-        {activeTab === "servers" && (
+        {activeTabAllowed && activeTab === "servers" && (
           <ServersList
+            currentUser={currentUser}
             loading={loading}
             providerReachable={providerReachable}
             servers={data.servers}
             selectedProvider={selectedProvider}
+            vmRequests={data.vmRequests}
             onAction={runAction}
           />
         )}
-        {activeTab === "create" && (
+        {activeTabAllowed && activeTab === "create" && (
           <CreateVmForm
+            currentUser={currentUser}
             flavors={data.flavors}
             images={data.images}
             initialValues={requestDefaults}
@@ -305,14 +342,16 @@ export default function App() {
             onError={setError}
           />
         )}
-        {activeTab === "images" && <ImagesList images={data.images} />}
-        {activeTab === "flavors" && <FlavorsList flavors={data.flavors} />}
-        {activeTab === "networks" && <NetworksList networks={data.networks} />}
-        {activeTab === "floatingIps" && (
+        {activeTabAllowed && activeTab === "images" && <ImagesList images={data.images} />}
+        {activeTabAllowed && activeTab === "flavors" && <FlavorsList flavors={data.flavors} />}
+        {activeTabAllowed && activeTab === "networks" && <NetworksList networks={data.networks} />}
+        {activeTabAllowed && activeTab === "floatingIps" && (
           <FloatingIpsPanel
+            currentUser={currentUser}
             floatingIps={data.floatingIps}
             providerReachable={providerReachable}
             servers={data.servers}
+            vmRequests={data.vmRequests}
             onAction={runAction}
           />
         )}
@@ -358,15 +397,59 @@ function ProviderSelector({ onChange, providers, selectedProviderId }) {
   );
 }
 
+function UserSelector({ currentUser, onChange }) {
+  return (
+    <label className="user-selector">
+      <span>User</span>
+      <select
+        onChange={(event) => {
+          const user = mockUsers.find((item) => item.id === event.target.value) ?? mockUsers[0];
+          onChange(user);
+        }}
+        value={currentUser.id}
+      >
+        {mockUsers.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function NotAuthorized({ role }) {
+  return (
+    <section className="not-authorized-panel">
+      <p className="eyebrow">RBAC</p>
+      <h2>Not authorized</h2>
+      <p>
+        The selected {role} role can only access permitted OpenStack MVP sections. Choose a
+        different mock user to continue.
+      </p>
+    </section>
+  );
+}
+
 function ProviderBadge({ provider }) {
   return (
     <span className={`provider-badge ${provider.enabled ? "enabled" : "disabled"}`}>
-      {provider.name} · {provider.enabled ? "Enabled" : "Coming Soon"}
+      {provider.name} - {provider.enabled ? "Enabled" : "Coming Soon"}
     </span>
   );
 }
 
-function ServiceCatalog({ loading, onRequest, selectedProvider, services }) {
+function RoleBadge({ user }) {
+  return (
+    <span className={`role-badge ${user.role}`}>
+      {user.label} - {user.name}
+    </span>
+  );
+}
+
+function ServiceCatalog({ currentUser, loading, onRequest, selectedProvider, services }) {
+  const canRequest = canManageResources(currentUser.role);
+
   return (
     <section className="catalog-page">
       <div className="dashboard-hero">
@@ -379,9 +462,14 @@ function ServiceCatalog({ loading, onRequest, selectedProvider, services }) {
         </div>
         <div className="hero-actions">
           <ProviderBadge provider={selectedProvider} />
+          <RoleBadge user={currentUser} />
           <span className="status-pill">{services.length} services</span>
         </div>
       </div>
+
+      {!canRequest && (
+        <div className="alert warning">Not authorized: viewers can browse the catalog only.</div>
+      )}
 
       {loading && (
         <div className="catalog-loading">
@@ -406,7 +494,12 @@ function ServiceCatalog({ loading, onRequest, selectedProvider, services }) {
               <Detail label="Disk" value={`${service.recommended_disk_gb} GB`} />
               <Detail label="Cost" value={formatCurrency(service.estimated_monthly_cost)} />
             </dl>
-            <button className="primary" onClick={() => onRequest(service)} type="button">
+            <button
+              className="primary"
+              disabled={!canRequest}
+              onClick={() => onRequest(service)}
+              type="button"
+            >
               Request Service
             </button>
           </article>
@@ -423,7 +516,7 @@ function ServiceCatalog({ loading, onRequest, selectedProvider, services }) {
   );
 }
 
-function MyRequestsPage({ loading, onError, requests, selectedProvider }) {
+function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvider }) {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
@@ -452,6 +545,7 @@ function MyRequestsPage({ loading, onError, requests, selectedProvider }) {
         </div>
         <div className="hero-actions">
           <ProviderBadge provider={selectedProvider} />
+          <RoleBadge user={currentUser} />
           <span className="status-pill">{requests.length} requests</span>
         </div>
       </div>
@@ -1013,7 +1107,15 @@ function Dashboard({ data, loading, providerReachable, selectedProvider }) {
   );
 }
 
-function ServersList({ loading, providerReachable, selectedProvider, servers, onAction }) {
+function ServersList({
+  currentUser,
+  loading,
+  providerReachable,
+  selectedProvider,
+  servers,
+  vmRequests,
+  onAction,
+}) {
   const [pendingServer, setPendingServer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedServer, setSelectedServer] = useState(null);
@@ -1040,6 +1142,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
         </div>
         <div className="hero-actions">
           <ProviderBadge provider={selectedProvider} />
+          <RoleBadge user={currentUser} />
           <span className="status-pill">{servers.length} servers</span>
         </div>
       </div>
@@ -1069,6 +1172,8 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
               {!loading &&
                 servers.map((server) => {
                   const ips = getServerIps(server.addresses);
+                  const actionsAllowed =
+                    providerReachable && canManageServer(server, currentUser, vmRequests);
                   return (
                     <tr className="clickable-row" key={server.id} onClick={() => setSelectedServer(server)}>
                       <td>
@@ -1088,7 +1193,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         <div className="button-row server-actions">
                         <ActionButton
                           busy={pendingServer === `${server.id}:start`}
-                          disabled={!providerReachable}
+                          disabled={!actionsAllowed}
                           label="Start"
                           onClick={() =>
                             runServerAction("start", "Start server", server, () =>
@@ -1098,7 +1203,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:stop`}
-                          disabled={!providerReachable}
+                          disabled={!actionsAllowed}
                           label="Stop"
                           onClick={() =>
                             runServerAction("stop", "Stop server", server, () =>
@@ -1108,7 +1213,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:soft-reboot`}
-                          disabled={!providerReachable}
+                          disabled={!actionsAllowed}
                           label="Soft Reboot"
                           onClick={() =>
                             runServerAction("soft-reboot", "Soft reboot server", server, () =>
@@ -1118,7 +1223,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         />
                         <ActionButton
                           busy={pendingServer === `${server.id}:hard-reboot`}
-                          disabled={!providerReachable}
+                          disabled={!actionsAllowed}
                           label="Hard Reboot"
                           onClick={() =>
                             runServerAction("hard-reboot", "Hard reboot server", server, () =>
@@ -1128,7 +1233,7 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         />
                         <button
                           className="danger"
-                          disabled={!providerReachable}
+                          disabled={!actionsAllowed}
                           onClick={() => setConfirmDelete(server)}
                           type="button"
                         >
@@ -1209,6 +1314,8 @@ function ServerDetailsPanel({ onClose, server }) {
         <Detail label="Flavor" value={server.flavor_id} />
         <Detail label="Private IP" value={ips.privateIp} />
         <Detail label="Floating IP" value={ips.floatingIp} />
+        <Detail label="Owner" value={server.metadata?.owner} />
+        <Detail label="App tag" value={server.metadata?.app_tag} />
         <Detail label="Project" value={server.project_id} />
         <Detail label="Created" value={formatDateTime(server.created_at)} />
         <Detail label="Updated" value={formatDateTime(server.updated_at)} />
@@ -1221,6 +1328,7 @@ function ServerDetailsPanel({ onClose, server }) {
 }
 
 function CreateVmForm({
+  currentUser,
   images,
   flavors,
   initialValues,
@@ -1237,6 +1345,7 @@ function CreateVmForm({
   const [lastSubmission, setLastSubmission] = useState(null);
   const governance = evaluateGovernancePreview(form);
   const providerSelectionDisabled = !providerReachable && Boolean(form.catalog_service_name);
+  const canSubmit = canManageResources(currentUser.role);
 
   useEffect(() => {
     setForm(
@@ -1258,6 +1367,10 @@ function CreateVmForm({
 
   async function submit(event) {
     event.preventDefault();
+    if (!canSubmit) {
+      onError("Not authorized: viewers cannot create VM requests.");
+      return;
+    }
     setSaving(true);
     onError("");
     try {
@@ -1277,8 +1390,14 @@ function CreateVmForm({
     <section>
       <div className="section-title">
         <h2>VM Request</h2>
-        <ProviderBadge provider={selectedProvider} />
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <RoleBadge user={currentUser} />
+        </div>
       </div>
+      {!canSubmit && (
+        <div className="alert warning">Not authorized: viewers cannot create VM requests.</div>
+      )}
       <form className="form-grid" onSubmit={submit}>
         <label>
           Name
@@ -1497,7 +1616,7 @@ function CreateVmForm({
           Public IP required
         </label>
         <GovernancePreview evaluation={governance} serviceName={form.catalog_service_name} />
-        <button className="primary form-submit" disabled={saving} type="submit">
+        <button className="primary form-submit" disabled={saving || !canSubmit} type="submit">
           {saving ? "Submitting..." : "Submit Request"}
         </button>
       </form>
@@ -1647,9 +1766,18 @@ function NetworksList({ networks }) {
   );
 }
 
-function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction }) {
+function FloatingIpsPanel({
+  currentUser,
+  floatingIps,
+  providerReachable,
+  servers,
+  vmRequests,
+  onAction,
+}) {
   const [selectedServer, setSelectedServer] = useState("");
   const [selectedIp, setSelectedIp] = useState("");
+  const actionsAllowed = providerReachable && canManageResources(currentUser.role);
+  const manageableServers = servers.filter((server) => canManageServer(server, currentUser, vmRequests));
 
   const availableIps = useMemo(
     () => floatingIps.filter((ip) => !ip.port_id && ip.floating_ip_address),
@@ -1662,7 +1790,7 @@ function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction })
         <h2>Floating IPs</h2>
         <button
           className="primary"
-          disabled={!providerReachable}
+          disabled={!actionsAllowed}
           onClick={() => onAction("Allocate floating IP", api.createFloatingIp)}
           type="button"
         >
@@ -1674,7 +1802,7 @@ function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction })
         className="inline-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!providerReachable) {
+          if (!actionsAllowed) {
             return;
           }
           onAction("Attach floating IP", () => api.attachFloatingIp(selectedServer, selectedIp));
@@ -1686,7 +1814,7 @@ function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction })
           value={selectedServer}
         >
           <option value="">Select server</option>
-          {servers.map((server) => (
+          {manageableServers.map((server) => (
             <option key={server.id} value={server.id}>
               {server.name || server.id}
             </option>
@@ -1700,7 +1828,7 @@ function FloatingIpsPanel({ floatingIps, providerReachable, servers, onAction })
             </option>
           ))}
         </select>
-        <button disabled={!providerReachable} type="submit">
+        <button disabled={!actionsAllowed} type="submit">
           Attach
         </button>
       </form>
@@ -1879,6 +2007,42 @@ function isPrivateIp(ipAddress) {
 
 function normalizeStatus(status) {
   return String(status ?? "unknown").toLowerCase().replaceAll(" ", "-");
+}
+
+function canAccessTab(tabId, role) {
+  const tab = tabs.find((item) => item.id === tabId);
+  return Boolean(tab?.roles.includes(role));
+}
+
+function canManageResources(role) {
+  return role === "engineer" || role === "admin";
+}
+
+function canManageServer(server, user, requests) {
+  if (user.role === "admin") {
+    return true;
+  }
+
+  if (user.role !== "engineer") {
+    return false;
+  }
+
+  const metadata = server.metadata ?? {};
+  if (metadata.owner === user.name) {
+    return true;
+  }
+
+  return requests.some((request) => {
+    const requestPayload = request.request ?? {};
+    const requestServer = request.server ?? {};
+    const requestMetadata = requestServer.metadata ?? {};
+
+    return (
+      requestServer.id === server.id ||
+      (requestServer.id === server.id && requestMetadata.owner === user.name) ||
+      (metadata.app_tag && metadata.app_tag === requestPayload.app_tag)
+    );
+  });
 }
 
 function shortId(value) {
