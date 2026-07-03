@@ -188,6 +188,19 @@ class OpenStackRequestActivity(BaseModel):
     actor: str = "system"
 
 
+class OpenStackAuditEvent(BaseModel):
+    id: str
+    timestamp: str
+    actor: str
+    role: str
+    action: str
+    resource_type: str
+    resource_id: str | None = None
+    request_id: str | None = None
+    status: str
+    message: str
+
+
 class OpenStackVMRequestRecord(BaseModel):
     id: str
     status: str

@@ -11,6 +11,7 @@ const mockUsers = [
 const tabs = [
   { id: "dashboard", label: "Dashboard", roles: ["engineer", "admin", "viewer"] },
   { id: "catalog", label: "Service Catalog", roles: ["engineer", "admin", "viewer"] },
+  { id: "activity", label: "Activity", roles: ["engineer", "admin", "viewer"] },
   { id: "requests", label: "My Requests", roles: ["engineer", "admin"] },
   { id: "admin", label: "Admin", roles: ["admin"] },
   { id: "servers", label: "Servers", roles: ["engineer", "admin", "viewer"] },
@@ -55,6 +56,7 @@ function useOpenStackData(currentUser) {
     catalogServices: [],
     vmRequests: [],
     pendingRequests: [],
+    auditEvents: [],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -90,8 +92,18 @@ function useOpenStackData(currentUser) {
             (reason) => ({ status: "rejected", reason }),
           )
         : Promise.resolve({ status: "fulfilled", value: [] });
+    const auditPromise = api.listAuditEvents().then(
+      (value) => ({ status: "fulfilled", value }),
+      (reason) => ({ status: "rejected", reason }),
+    );
 
-    const [openStackResults, catalogResult, vmRequestsResult, pendingRequestsResult] = await Promise.all([
+    const [
+      openStackResults,
+      catalogResult,
+      vmRequestsResult,
+      pendingRequestsResult,
+      auditResult,
+    ] = await Promise.all([
       Promise.allSettled(openStackRequests.map(([, request]) => request)),
       api.listCatalogServices().then(
         (value) => ({ status: "fulfilled", value }),
@@ -99,6 +111,7 @@ function useOpenStackData(currentUser) {
       ),
       vmRequestsPromise,
       pendingRequestsPromise,
+      auditPromise,
     ]);
 
     const nextData = {
@@ -113,6 +126,7 @@ function useOpenStackData(currentUser) {
       catalogServices: [],
       vmRequests: [],
       pendingRequests: [],
+      auditEvents: [],
     };
     let openStackErrorCount = 0;
 
@@ -142,6 +156,12 @@ function useOpenStackData(currentUser) {
       nextData.pendingRequests = pendingRequestsResult.value;
     } else {
       setError(`Pending requests failed: ${pendingRequestsResult.reason.message}`);
+    }
+
+    if (auditResult.status === "fulfilled") {
+      nextData.auditEvents = auditResult.value;
+    } else {
+      setError(`Activity failed: ${auditResult.reason.message}`);
     }
 
     setProviderReachable(openStackErrorCount === 0);
@@ -290,6 +310,14 @@ export default function App() {
             }}
             selectedProvider={selectedProvider}
             services={data.catalogServices}
+          />
+        )}
+        {activeTabAllowed && activeTab === "activity" && (
+          <ActivityPage
+            events={data.auditEvents}
+            loading={loading}
+            selectedProvider={selectedProvider}
+            currentUser={currentUser}
           />
         )}
         {activeTabAllowed && activeTab === "requests" && (
@@ -516,6 +544,29 @@ function ServiceCatalog({ currentUser, loading, onRequest, selectedProvider, ser
   );
 }
 
+function ActivityPage({ currentUser, events, loading, selectedProvider }) {
+  return (
+    <section className="activity-page">
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Audit</p>
+          <h2>Activity</h2>
+          <p className="dashboard-copy">
+            Recent OpenStack request, policy, provisioning, and lifecycle events.
+          </p>
+        </div>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <RoleBadge user={currentUser} />
+          <span className="status-pill">{events.length} events</span>
+        </div>
+      </div>
+
+      <AuditTimeline events={events} loading={loading} />
+    </section>
+  );
+}
+
 function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvider }) {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
@@ -524,8 +575,11 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
     setDetailsLoading(true);
     onError("");
     try {
-      const result = await api.getVmRequest(requestId);
-      setSelectedRequest(result);
+      const [result, timeline] = await Promise.all([
+        api.getVmRequest(requestId),
+        api.getRequestTimeline(requestId),
+      ]);
+      setSelectedRequest({ ...result, timeline });
     } catch (err) {
       onError(err.message);
     } finally {
@@ -637,8 +691,11 @@ function AdminApprovalDashboard({
     setDetailsLoading(true);
     onError("");
     try {
-      const result = await api.getVmRequest(requestId);
-      setSelectedRequest(result);
+      const [result, timeline] = await Promise.all([
+        api.getVmRequest(requestId),
+        api.getRequestTimeline(requestId),
+      ]);
+      setSelectedRequest({ ...result, timeline });
       setRejectReason("");
     } catch (err) {
       onError(err.message);
@@ -835,6 +892,7 @@ function AdminRequestDetailsPanel({
       </dl>
 
       <LifecycleTimeline request={request} />
+      <AuditTimeline events={request.timeline ?? []} compact title="Approval / Provisioning Timeline" />
       {failure && <FailureNotice failure={failure} />}
       <GovernanceExplanation policy={policy} request={payload} />
       <CostBreakdown cost={cost} />
@@ -906,6 +964,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
   const policy = request.policy ?? {};
   const payload = request.request ?? {};
   const cost = getCostBreakdown(payload, policy);
+  const failure = getFailureDetails(request);
 
   return (
     <aside className="request-details-panel">
@@ -932,6 +991,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
       </dl>
 
       <LifecycleTimeline request={request} />
+      <AuditTimeline events={request.timeline ?? []} compact title="Request Timeline" />
       {failure && <FailureNotice failure={failure} />}
       <GovernanceExplanation policy={policy} request={payload} />
       <CostBreakdown cost={cost} />
@@ -1056,6 +1116,41 @@ function ActivityLog({ entries }) {
       ) : (
         <p className="dashboard-copy">No audit activity recorded yet.</p>
       )}
+    </section>
+  );
+}
+
+function AuditTimeline({ compact = false, events, loading = false, title = "Recent Activity" }) {
+  const visibleEvents = events ?? [];
+
+  return (
+    <section className={compact ? "details-section audit-section compact" : "audit-section"}>
+      <h4>{title}</h4>
+      {loading && (
+        <div className="table-loading inline-loading">
+          <span className="spinner" />
+          <span>Loading activity...</span>
+        </div>
+      )}
+      {!loading && visibleEvents.length === 0 && (
+        <p className="dashboard-copy">No activity recorded yet.</p>
+      )}
+      <ol className="audit-timeline">
+        {visibleEvents.map((event) => (
+          <li key={event.id}>
+            <span className={`audit-dot ${normalizeStatus(event.status)}`} />
+            <div>
+              <strong>{formatDecision(event.action)}</strong>
+              <p>{event.message}</p>
+              <small>
+                {formatDateTime(event.timestamp)} - {event.actor} ({event.role}) -{" "}
+                {event.resource_type}
+                {event.request_id ? ` - ${shortId(event.request_id)}` : ""}
+              </small>
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

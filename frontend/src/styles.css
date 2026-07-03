@@ -531,6 +531,85 @@ dd {
   gap: 18px;
 }
 
+.activity-page {
+  display: grid;
+  gap: 18px;
+}
+
+.audit-section {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  padding: 18px;
+  position: relative;
+}
+
+.audit-section.compact {
+  padding: 0;
+}
+
+.audit-section h4 {
+  margin: 0 0 12px;
+}
+
+.audit-timeline {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.audit-timeline li {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+
+.audit-dot {
+  background: #94a3b8;
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 7px;
+  width: 10px;
+}
+
+.audit-dot.succeeded,
+.audit-dot.approved,
+.audit-dot.accepted {
+  background: #16a34a;
+}
+
+.audit-dot.failed,
+.audit-dot.rejected {
+  background: #dc2626;
+}
+
+.audit-dot.started,
+.audit-dot.submitted,
+.audit-dot.approval_required {
+  background: #f59e0b;
+}
+
+.audit-timeline strong {
+  color: #172033;
+}
+
+.audit-timeline p {
+  color: #43516a;
+  margin: 2px 0;
+}
+
+.audit-timeline small {
+  color: #65738a;
+}
+
+.inline-loading {
+  margin-bottom: 12px;
+  min-height: 44px;
+  position: static;
+}
+
 .requests-layout {
   display: grid;
   gap: 18px;

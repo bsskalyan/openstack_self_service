@@ -8,6 +8,7 @@ from openstack.connection import Connection
 from openstack.exceptions import SDKException
 
 from app.core.config import Settings
+from app.providers.openstack.audit_store import OpenStackAuditStore
 from app.providers.openstack.policy import evaluate_vm_request
 from app.providers.openstack.request_store import OpenStackRequestStore
 from app.providers.openstack.schemas import OpenStackRejectRequest, OpenStackVMRequest
@@ -42,6 +43,7 @@ class OpenStackService:
         self._settings = settings
         self._connection: Connection | None = None
         self._request_store = OpenStackRequestStore()
+        self._audit_store = OpenStackAuditStore()
 
     def get_connection(self) -> Connection:
         if self._connection is None:
@@ -286,8 +288,38 @@ class OpenStackService:
         policy_result = evaluate_vm_request(request)
         request_id = str(uuid4())
         now = self._now()
+        self._record_audit_event(
+            actor=owner,
+            role=owner_role,
+            action="request_submitted",
+            resource_type="request",
+            resource_id=request_id,
+            request_id=request_id,
+            status="submitted",
+            message=f"Request '{request.name}' submitted",
+        )
+        self._record_audit_event(
+            actor="system",
+            role="system",
+            action="policy_evaluated",
+            resource_type="request",
+            resource_id=request_id,
+            request_id=request_id,
+            status=policy_result.final_decision,
+            message=f"Policy evaluated with governance score {policy_result.governance_score}",
+        )
 
         if policy_result.final_decision == "approval_required":
+            self._record_audit_event(
+                actor="system",
+                role="system",
+                action="approval_required",
+                resource_type="request",
+                resource_id=request_id,
+                request_id=request_id,
+                status="approval_required",
+                message="Request requires admin approval",
+            )
             record = self._build_request_record(
                 request_id=request_id,
                 request=request,
@@ -313,6 +345,26 @@ class OpenStackService:
             )
             return self._request_store.save_request(record)
 
+        self._record_audit_event(
+            actor="system",
+            role="system",
+            action="auto_approved",
+            resource_type="request",
+            resource_id=request_id,
+            request_id=request_id,
+            status="auto_approved",
+            message="Request auto-approved by policy",
+        )
+        self._record_audit_event(
+            actor="system",
+            role="system",
+            action="provisioning_started",
+            resource_type="server",
+            resource_id=None,
+            request_id=request_id,
+            status="started",
+            message="VM provisioning started",
+        )
         try:
             server = self.create_server(
                 name=request.name,
@@ -330,6 +382,16 @@ class OpenStackService:
             )
         except OpenStackServiceError as exc:
             failure_details = exc.failure_details or self._build_failure_details(exc)
+            self._record_audit_event(
+                actor="system",
+                role="system",
+                action="provisioning_failed",
+                resource_type="server",
+                resource_id=None,
+                request_id=request_id,
+                status="failed",
+                message=failure_details["user_message"],
+            )
             record = self._build_request_record(
                 request_id=request_id,
                 request=request,
@@ -367,6 +429,16 @@ class OpenStackService:
             "provisioned_notify"
             if policy_result.governance_decision == "auto_provision_notify"
             else "provisioned"
+        )
+        self._record_audit_event(
+            actor="system",
+            role="system",
+            action="provisioning_succeeded",
+            resource_type="server",
+            resource_id=server.get("id"),
+            request_id=request_id,
+            status="succeeded",
+            message=f"VM provisioned with server id '{server.get('id')}'",
         )
         record = self._build_request_record(
             request_id=request_id,
@@ -409,7 +481,28 @@ class OpenStackService:
     def get_vm_request(self, request_id: str) -> dict[str, Any]:
         return self._get_request_or_raise(request_id)
 
-    def approve_vm_request(self, request_id: str, *, actor: str = "admin") -> dict[str, Any]:
+    def list_audit_events(self) -> list[dict[str, Any]]:
+        return sorted(
+            self._audit_store.list_events(),
+            key=lambda event: event.get("timestamp", ""),
+            reverse=True,
+        )
+
+    def get_request_timeline(self, request_id: str) -> list[dict[str, Any]]:
+        self._get_request_or_raise(request_id)
+        return [
+            event
+            for event in reversed(self.list_audit_events())
+            if event.get("request_id") == request_id
+        ]
+
+    def approve_vm_request(
+        self,
+        request_id: str,
+        *,
+        actor: str = "admin",
+        role: str = "admin",
+    ) -> dict[str, Any]:
         record = self._get_request_or_raise(request_id)
         if record["status"] != "approval_required":
             raise OpenStackServiceError(
@@ -417,19 +510,73 @@ class OpenStackService:
             )
 
         request = OpenStackVMRequest(**record["request"])
-        server = self.create_server(
-            name=request.name,
-            image_id=request.image_id,
-            flavor_id=request.flavor_id,
-            network_id=request.network_id,
-            key_name=request.key_name,
-            security_group_id=request.security_group_id,
-            metadata=self._build_server_metadata(
-                owner=record.get("owner"),
-                owner_role=record.get("owner_role"),
-                app_tag=request.app_tag,
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action="approved",
+            resource_type="request",
+            resource_id=request_id,
+            request_id=request_id,
+            status="approved",
+            message="Request approved",
+        )
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action="provisioning_started",
+            resource_type="server",
+            resource_id=None,
+            request_id=request_id,
+            status="started",
+            message="VM provisioning started after approval",
+        )
+        try:
+            server = self.create_server(
+                name=request.name,
+                image_id=request.image_id,
+                flavor_id=request.flavor_id,
+                network_id=request.network_id,
+                key_name=request.key_name,
+                security_group_id=request.security_group_id,
+                metadata=self._build_server_metadata(
+                    owner=record.get("owner"),
+                    owner_role=record.get("owner_role"),
+                    app_tag=request.app_tag,
+                    request_id=request_id,
+                ),
+            )
+        except OpenStackServiceError as exc:
+            failure_details = exc.failure_details or self._build_failure_details(exc)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="provisioning_failed",
+                resource_type="server",
+                resource_id=None,
                 request_id=request_id,
-            ),
+                status="failed",
+                message=failure_details["user_message"],
+            )
+            self._request_store.update_request(
+                request_id,
+                {
+                    "status": "draft",
+                    "updated_at": self._now(),
+                    "provisioning_error": failure_details["user_message"],
+                    "failure_details": failure_details,
+                },
+            )
+            raise
+
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action="provisioning_succeeded",
+            resource_type="server",
+            resource_id=server.get("id"),
+            request_id=request_id,
+            status="succeeded",
+            message=f"VM provisioned with server id '{server.get('id')}'",
         )
         updated = self._request_store.update_request(
             request_id,
@@ -455,6 +602,7 @@ class OpenStackService:
         request: OpenStackRejectRequest | None = None,
         *,
         actor: str = "admin",
+        role: str = "admin",
     ) -> dict[str, Any]:
         record = self._get_request_or_raise(request_id)
         if record["status"] != "approval_required":
@@ -462,6 +610,16 @@ class OpenStackService:
                 f"Request '{request_id}' cannot be rejected from status '{record['status']}'",
             )
 
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action="rejected",
+            resource_type="request",
+            resource_id=request_id,
+            request_id=request_id,
+            status="rejected",
+            message=request.reason if request and request.reason else "Request rejected",
+        )
         updated = self._request_store.update_request(
             request_id,
             {
@@ -482,12 +640,28 @@ class OpenStackService:
         logger.info("Rejected VM request id='%s'", request_id)
         return updated or record
 
-    def delete_server(self, server_id: str) -> dict[str, Any]:
+    def delete_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         try:
             connection = self.get_connection()
             server = connection.compute.get_server(server_id)
             logger.info("Deleting OpenStack server id='%s', name='%s'", server.id, server.name)
             connection.compute.delete_server(server, ignore_missing=False)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="server_deleted",
+                resource_type="server",
+                resource_id=server.id,
+                request_id=self._find_request_id_for_server(server.id),
+                status="accepted",
+                message=f"Server '{server.name or server.id}' delete requested",
+            )
             return self._serialize_lifecycle_response(
                 server=server,
                 action="delete",
@@ -498,12 +672,28 @@ class OpenStackService:
                 f"Failed to delete OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
-    def start_server(self, server_id: str) -> dict[str, Any]:
+    def start_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         try:
             connection = self.get_connection()
             server = connection.compute.get_server(server_id)
             logger.info("Starting OpenStack server id='%s', name='%s'", server.id, server.name)
             connection.compute.start_server(server)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="server_started",
+                resource_type="server",
+                resource_id=server.id,
+                request_id=self._find_request_id_for_server(server.id),
+                status="accepted",
+                message=f"Server '{server.name or server.id}' start requested",
+            )
             return self._serialize_lifecycle_response(
                 server=server,
                 action="start",
@@ -514,12 +704,28 @@ class OpenStackService:
                 f"Failed to start OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
-    def stop_server(self, server_id: str) -> dict[str, Any]:
+    def stop_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         try:
             connection = self.get_connection()
             server = connection.compute.get_server(server_id)
             logger.info("Stopping OpenStack server id='%s', name='%s'", server.id, server.name)
             connection.compute.stop_server(server)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="server_stopped",
+                resource_type="server",
+                resource_id=server.id,
+                request_id=self._find_request_id_for_server(server.id),
+                status="accepted",
+                message=f"Server '{server.name or server.id}' stop requested",
+            )
             return self._serialize_lifecycle_response(
                 server=server,
                 action="stop",
@@ -530,7 +736,14 @@ class OpenStackService:
                 f"Failed to stop OpenStack server: {self._format_openstack_error(exc)}",
             ) from exc
 
-    def reboot_server(self, server_id: str, reboot_type: str = "SOFT") -> dict[str, Any]:
+    def reboot_server(
+        self,
+        server_id: str,
+        reboot_type: str = "SOFT",
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         try:
             connection = self.get_connection()
             server = connection.compute.get_server(server_id)
@@ -542,6 +755,16 @@ class OpenStackService:
                 normalized_reboot_type,
             )
             connection.compute.reboot_server(server, reboot_type=normalized_reboot_type)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="server_rebooted",
+                resource_type="server",
+                resource_id=server.id,
+                request_id=self._find_request_id_for_server(server.id),
+                status="accepted",
+                message=f"Server '{server.name or server.id}' {normalized_reboot_type.lower()} reboot requested",
+            )
             return self._serialize_lifecycle_response(
                 server=server,
                 action=f"{normalized_reboot_type.lower()}-reboot",
@@ -670,6 +893,14 @@ class OpenStackService:
 
         return record
 
+    def _find_request_id_for_server(self, server_id: str) -> str | None:
+        for record in self._request_store.list_requests():
+            server = record.get("server") or {}
+            if server.get("id") == server_id:
+                return record.get("id")
+
+        return None
+
     @staticmethod
     def _build_request_record(
         *,
@@ -721,6 +952,32 @@ class OpenStackService:
                 actor=actor,
             ),
         ]
+
+    def _record_audit_event(
+        self,
+        *,
+        actor: str | None,
+        role: str | None,
+        action: str,
+        resource_type: str,
+        resource_id: str | None,
+        request_id: str | None,
+        status: str,
+        message: str,
+    ) -> dict[str, Any]:
+        event = {
+            "id": str(uuid4()),
+            "timestamp": self._now(),
+            "actor": actor or "system",
+            "role": role or "system",
+            "action": action,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "request_id": request_id,
+            "status": status,
+            "message": message,
+        }
+        return self._audit_store.save_event(event)
 
     @staticmethod
     def _activity_entry(

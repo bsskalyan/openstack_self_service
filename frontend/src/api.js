@@ -68,6 +68,8 @@ export const api = {
     }),
   listVmRequests: () => request("/openstack/requests"),
   getVmRequest: (requestId) => request(`/openstack/requests/${requestId}`),
+  listAuditEvents: () => request("/openstack/audit"),
+  getRequestTimeline: (requestId) => request(`/openstack/requests/${requestId}/timeline`),
   listPendingVmRequests: () => request("/openstack/requests/pending"),
   approveVmRequest: (requestId) =>
     request(`/openstack/requests/${requestId}/approve`, { method: "POST" }),

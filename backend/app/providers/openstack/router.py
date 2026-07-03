@@ -14,6 +14,7 @@ from app.core.user_context import (
 from app.providers.openstack.schemas import (
     OpenStackCreateServerRequest,
     OpenStackCreateServerResponse,
+    OpenStackAuditEvent,
     OpenStackAttachFloatingIPRequest,
     OpenStackCreateFloatingIPRequest,
     OpenStackFlavorResponse,
@@ -127,6 +128,31 @@ def assert_server_manage_allowed(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=UNAUTHORIZED_MESSAGE,
     )
+
+
+def is_audit_event_visible_to_user(event: dict[str, Any], user: CurrentUser) -> bool:
+    if user.is_admin:
+        return True
+
+    if user.role == "viewer":
+        return event.get("resource_type") in {"catalog", "server"} and event.get("status") in {
+            "accepted",
+            "succeeded",
+        }
+
+    if event.get("actor") == user.name:
+        return True
+
+    request_id = event.get("request_id")
+    if request_id:
+        try:
+            record = get_openstack_service().get_vm_request(request_id)
+        except OpenStackServiceError:
+            return False
+
+        return is_request_visible_to_user(record, user)
+
+    return False
 
 
 @router.get(
@@ -300,6 +326,44 @@ async def list_pending_vm_requests(
 
 
 @router.get(
+    "/audit",
+    response_model=list[OpenStackAuditEvent],
+    status_code=status.HTTP_200_OK,
+)
+async def list_audit_events(
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in openstack_service.list_audit_events()
+        if is_audit_event_visible_to_user(event, current_user)
+    ]
+
+
+@router.get(
+    "/requests/{request_id}/timeline",
+    response_model=list[OpenStackAuditEvent],
+    status_code=status.HTTP_200_OK,
+)
+async def get_request_timeline(
+    request_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> list[dict[str, Any]]:
+    try:
+        record = openstack_service.get_vm_request(request_id)
+        assert_request_visible_to_user(record, current_user)
+        return [
+            event
+            for event in openstack_service.get_request_timeline(request_id)
+            if is_audit_event_visible_to_user(event, current_user)
+        ]
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack request timeline lookup", exc) from exc
+
+
+@router.get(
     "/requests/{request_id}",
     response_model=OpenStackVMRequestRecord,
     status_code=status.HTTP_200_OK,
@@ -330,7 +394,11 @@ async def approve_vm_request(
 ) -> dict[str, Any]:
     ensure_role(current_user, ADMIN_ROLES)
     try:
-        return openstack_service.approve_vm_request(request_id, actor=current_user.name)
+        return openstack_service.approve_vm_request(
+            request_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack VM request approval", exc) from exc
 
@@ -348,7 +416,12 @@ async def reject_vm_request(
 ) -> dict[str, Any]:
     ensure_role(current_user, ADMIN_ROLES)
     try:
-        return openstack_service.reject_vm_request(request_id, request, actor=current_user.name)
+        return openstack_service.reject_vm_request(
+            request_id,
+            request,
+            actor=current_user.name,
+            role=current_user.role,
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack VM request rejection", exc) from exc
 
@@ -409,7 +482,11 @@ async def delete_server(
     ensure_role(current_user, WRITE_ROLES)
     assert_server_manage_allowed(server_id, current_user, openstack_provider.service)
     try:
-        return openstack_provider.delete_server(server_id)
+        return openstack_provider.delete_server(
+            server_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server deletion", exc) from exc
 
@@ -427,7 +504,11 @@ async def start_server(
     ensure_role(current_user, WRITE_ROLES)
     assert_server_manage_allowed(server_id, current_user, openstack_provider.service)
     try:
-        return openstack_provider.start_server(server_id)
+        return openstack_provider.start_server(
+            server_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server start", exc) from exc
 
@@ -445,7 +526,11 @@ async def stop_server(
     ensure_role(current_user, WRITE_ROLES)
     assert_server_manage_allowed(server_id, current_user, openstack_provider.service)
     try:
-        return openstack_provider.stop_server(server_id)
+        return openstack_provider.stop_server(
+            server_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server stop", exc) from exc
 
@@ -467,6 +552,8 @@ async def reboot_server(
         return openstack_provider.reboot_server(
             server_id,
             reboot_type=request.reboot_type if request else "SOFT",
+            actor=current_user.name,
+            role=current_user.role,
         )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server reboot", exc) from exc

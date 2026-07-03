@@ -51,14 +51,44 @@ class OpenStackProvider(CloudProvider):
             metadata=metadata,
         )
 
-    def start_server(self, server_id: str) -> dict[str, Any]:
-        return self._service.start_server(server_id)
+    def start_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
+        return self._service.start_server(server_id, actor=actor, role=role)
 
-    def stop_server(self, server_id: str) -> dict[str, Any]:
-        return self._service.stop_server(server_id)
+    def stop_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
+        return self._service.stop_server(server_id, actor=actor, role=role)
 
-    def reboot_server(self, server_id: str, reboot_type: str = "SOFT") -> dict[str, Any]:
-        return self._service.reboot_server(server_id, reboot_type=reboot_type)
+    def reboot_server(
+        self,
+        server_id: str,
+        reboot_type: str = "SOFT",
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
+        return self._service.reboot_server(
+            server_id,
+            reboot_type=reboot_type,
+            actor=actor,
+            role=role,
+        )
 
-    def delete_server(self, server_id: str) -> dict[str, Any]:
-        return self._service.delete_server(server_id)
+    def delete_server(
+        self,
+        server_id: str,
+        *,
+        actor: str | None = None,
+        role: str | None = None,
+    ) -> dict[str, Any]:
+        return self._service.delete_server(server_id, actor=actor, role=role)
