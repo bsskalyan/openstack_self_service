@@ -1890,6 +1890,15 @@ function CreateVmForm({
           Public IP required
         </label>
         <GovernancePreview evaluation={governance} serviceName={form.catalog_service_name} />
+        <ReviewSubmitSummary
+          flavors={flavors}
+          form={form}
+          governance={governance}
+          images={images}
+          keypairs={keypairs}
+          networks={networks}
+          securityGroups={securityGroups}
+        />
         <button className="primary form-submit" disabled={saving || !canSubmit} type="submit">
           {saving ? "Submitting..." : "Submit Request"}
         </button>
@@ -1980,6 +1989,109 @@ function GovernancePreview({ evaluation, serviceName }) {
           ))}
         </ul>
       </div>
+    </section>
+  );
+}
+
+function ReviewSubmitSummary({
+  flavors,
+  form,
+  governance,
+  images,
+  keypairs,
+  networks,
+  securityGroups,
+}) {
+  const missingFields = getMissingRequiredFields(form);
+  const isInvalid = missingFields.length > 0;
+  const expiryDate = getEstimatedExpiryDate(form);
+  const decision = isInvalid ? "Blocked / Invalid" : formatReviewDecision(governance.finalDecision);
+
+  return (
+    <section className="review-summary-section">
+      <div className="review-summary-header">
+        <div>
+          <p className="eyebrow">Review</p>
+          <h3>Review &amp; Submit</h3>
+        </div>
+        <span className={`decision-pill ${isInvalid ? "approval_required" : governance.finalDecision}`}>
+          {decision}
+        </span>
+      </div>
+
+      {isInvalid && (
+        <div className="alert warning review-missing-fields">
+          <strong>Missing required fields</strong>
+          <ul>
+            {missingFields.map((field) => (
+              <li key={field}>{field}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="review-summary-grid">
+        <ReviewGroup title="Business Information">
+          <Detail label="Project Name" value={form.project_name} />
+          <Detail label="Cost Center" value={form.cost_center} />
+          <Detail label="Business Unit" value={form.business_unit} />
+          <Detail label="Request Owner" value={form.request_owner} />
+          <Detail label="Team Name" value={form.team_name} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Application Information">
+          <Detail label="Application Name" value={form.application_name} />
+          <Detail label="Application Type" value={form.application_type} />
+          <Detail label="Purpose" value={form.purpose_description} />
+          <Detail label="App tag" value={form.app_tag} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Environment & Lifecycle">
+          <Detail label="Environment" value={formatEnvironment(form.environment)} />
+          <Detail label="Lifetime" value={formatLifetime(form)} />
+          <Detail label="Expires at" value={formatDateTime(expiryDate)} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Infrastructure Resources">
+          <Detail label="VM Name" value={form.name} />
+          <Detail label="Image" value={findResourceLabel(images, form.image_id)} />
+          <Detail label="Flavor" value={findResourceLabel(flavors, form.flavor_id)} />
+          <Detail label="Network" value={findResourceLabel(networks, form.network_id)} />
+          <Detail label="Keypair" value={findResourceLabel(keypairs, form.key_name, "name")} />
+          <Detail
+            label="Security Group"
+            value={findResourceLabel(securityGroups, form.security_group_id)}
+          />
+          <Detail label="CPU" value={form.cpu ? `${form.cpu} vCPU` : ""} />
+          <Detail label="RAM" value={form.ram_gb ? `${form.ram_gb} GB` : ""} />
+          <Detail label="Disk" value={form.disk_gb ? `${form.disk_gb} GB` : ""} />
+          <Detail label="Public IP" value={form.public_ip_required ? "Required" : "Not required"} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Additional Packages">
+          <Detail label="Selected packages" value={formatPackages(form.packages)} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Governance Evaluation">
+          <Detail label="Decision" value={decision} />
+          <Detail label="Governance score" value={`${governance.score} / 100`} />
+          <Detail label="Governance action" value={formatDecision(governance.governanceDecision)} />
+          <Detail label="Reason" value={governance.reasons.length ? governance.reasons.join(", ") : "No policy concerns detected"} />
+        </ReviewGroup>
+
+        <ReviewGroup title="Estimated Cost">
+          <Detail label="Monthly estimate" value={`${formatCurrency(governance.estimatedMonthlyCost)} / month`} />
+        </ReviewGroup>
+      </div>
+    </section>
+  );
+}
+
+function ReviewGroup({ children, title }) {
+  return (
+    <section className="review-summary-card">
+      <h4>{title}</h4>
+      <dl>{children}</dl>
     </section>
   );
 }
@@ -2446,6 +2558,71 @@ function normalizePackageSelection(packages) {
 
 function formatPackages(packages) {
   return Array.isArray(packages) && packages.length > 0 ? packages.join(", ") : "-";
+}
+
+function getMissingRequiredFields(form) {
+  const requiredFields = [
+    ["Project Name", form.project_name],
+    ["Cost Center", form.cost_center],
+    ["Request Owner", form.request_owner],
+    ["Application Name", form.application_name],
+    ["VM Name", form.name],
+    ["Image", form.image_id],
+    ["Flavor", form.flavor_id],
+    ["Network", form.network_id],
+    ["CPU", form.cpu],
+    ["RAM", form.ram_gb],
+    ["Disk", form.disk_gb],
+    ["App tag", form.app_tag],
+    ["Environment", form.environment],
+    ["Lifetime", form.lifetime],
+  ];
+
+  const missing = requiredFields
+    .filter(([, value]) => value === null || value === undefined || String(value).trim() === "")
+    .map(([label]) => label);
+
+  if (Number(form.cpu) <= 0) {
+    missing.push("CPU must be greater than 0");
+  }
+
+  if (Number(form.ram_gb) <= 0) {
+    missing.push("RAM must be greater than 0");
+  }
+
+  if (Number(form.disk_gb) <= 0) {
+    missing.push("Disk must be greater than 0");
+  }
+
+  return Array.from(new Set(missing));
+}
+
+function getEstimatedExpiryDate(form) {
+  const days = getLifetimeDays(form.lifetime);
+  if (!Number.isFinite(days) || days <= 0) {
+    return null;
+  }
+
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + days);
+  return expiry.toISOString();
+}
+
+function findResourceLabel(resources, value, idField = "id") {
+  if (!value) {
+    return "";
+  }
+
+  if (String(value).startsWith("auto:")) {
+    return "Will be selected automatically";
+  }
+
+  const resource = resources.find((item) => item[idField] === value || item.id === value || item.name === value);
+  return resource?.name || resource?.id || value;
+}
+
+function formatReviewDecision(decision) {
+  return decision === "auto_approved" ? "Auto Approved" : "Approval Required";
 }
 
 function formatRequestedResources(payload) {
