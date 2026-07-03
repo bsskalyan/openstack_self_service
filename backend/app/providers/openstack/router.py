@@ -211,6 +211,17 @@ async def list_vm_requests(
 
 
 @router.get(
+    "/requests/pending",
+    response_model=list[OpenStackVMRequestRecord],
+    status_code=status.HTTP_200_OK,
+)
+async def list_pending_vm_requests(
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> list[dict[str, Any]]:
+    return openstack_service.list_pending_vm_requests()
+
+
+@router.get(
     "/requests/{request_id}",
     response_model=OpenStackVMRequestRecord,
     status_code=status.HTTP_200_OK,

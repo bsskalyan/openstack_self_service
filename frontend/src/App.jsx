@@ -6,6 +6,7 @@ const tabs = [
   { id: "dashboard", label: "Dashboard" },
   { id: "catalog", label: "Service Catalog" },
   { id: "requests", label: "My Requests" },
+  { id: "admin", label: "Admin" },
   { id: "servers", label: "Servers" },
   { id: "create", label: "Create VM" },
   { id: "images", label: "Images" },
@@ -47,6 +48,7 @@ function useOpenStackData() {
     floatingIps: [],
     catalogServices: [],
     vmRequests: [],
+    pendingRequests: [],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -67,13 +69,17 @@ function useOpenStackData() {
       ["floatingIps", api.listFloatingIps()],
     ];
 
-    const [openStackResults, catalogResult, vmRequestsResult] = await Promise.all([
+    const [openStackResults, catalogResult, vmRequestsResult, pendingRequestsResult] = await Promise.all([
       Promise.allSettled(openStackRequests.map(([, request]) => request)),
       api.listCatalogServices().then(
         (value) => ({ status: "fulfilled", value }),
         (reason) => ({ status: "rejected", reason }),
       ),
       api.listVmRequests().then(
+        (value) => ({ status: "fulfilled", value }),
+        (reason) => ({ status: "rejected", reason }),
+      ),
+      api.listPendingVmRequests().then(
         (value) => ({ status: "fulfilled", value }),
         (reason) => ({ status: "rejected", reason }),
       ),
@@ -90,6 +96,7 @@ function useOpenStackData() {
       floatingIps: [],
       catalogServices: [],
       vmRequests: [],
+      pendingRequests: [],
     };
     let openStackErrorCount = 0;
 
@@ -113,6 +120,12 @@ function useOpenStackData() {
       nextData.vmRequests = vmRequestsResult.value;
     } else {
       setError(`VM requests failed: ${vmRequestsResult.reason.message}`);
+    }
+
+    if (pendingRequestsResult.status === "fulfilled") {
+      nextData.pendingRequests = pendingRequestsResult.value;
+    } else {
+      setError(`Pending requests failed: ${pendingRequestsResult.reason.message}`);
     }
 
     setProviderReachable(openStackErrorCount === 0);
@@ -220,6 +233,15 @@ export default function App() {
             loading={loading}
             onError={setError}
             requests={data.vmRequests}
+          />
+        )}
+        {activeTab === "admin" && (
+          <AdminApprovalDashboard
+            loading={loading}
+            onError={setError}
+            onRefresh={refresh}
+            onToast={showToast}
+            pendingRequests={data.pendingRequests}
           />
         )}
         {activeTab === "servers" && (
@@ -422,6 +444,267 @@ function MyRequestsPage({ loading, onError, requests }) {
         />
       </div>
     </section>
+  );
+}
+
+function AdminApprovalDashboard({ loading, onError, onRefresh, onToast, pendingRequests }) {
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+
+  async function openRequest(requestId) {
+    setDetailsLoading(true);
+    onError("");
+    try {
+      const result = await api.getVmRequest(requestId);
+      setSelectedRequest(result);
+      setRejectReason("");
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  async function approveRequest() {
+    if (!selectedRequest) {
+      return;
+    }
+
+    setActionLoading("approve");
+    onError("");
+    try {
+      const result = await api.approveVmRequest(selectedRequest.id);
+      setSelectedRequest(result);
+      onToast(`Request ${shortId(result.id)} approved`, "success");
+      await onRefresh();
+    } catch (err) {
+      onError(err.message);
+      onToast(`Approval failed: ${err.message}`, "error");
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  async function rejectRequest() {
+    if (!selectedRequest) {
+      return;
+    }
+
+    setActionLoading("reject");
+    onError("");
+    try {
+      const result = await api.rejectVmRequest(selectedRequest.id, rejectReason.trim() || null);
+      setSelectedRequest(result);
+      onToast(`Request ${shortId(result.id)} rejected`, "success");
+      await onRefresh();
+    } catch (err) {
+      onError(err.message);
+      onToast(`Rejection failed: ${err.message}`, "error");
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  return (
+    <section className="admin-page">
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Admin</p>
+          <h2>Approval Dashboard</h2>
+          <p className="dashboard-copy">
+            Review requests that require approval before OpenStack provisioning.
+          </p>
+        </div>
+        <span className="status-pill">{pendingRequests.length} pending</span>
+      </div>
+
+      <div className="requests-layout">
+        <div className="server-table-card requests-table">
+          {loading && (
+            <div className="table-loading">
+              <span className="spinner" />
+              <span>Loading pending requests...</span>
+            </div>
+          )}
+          <table>
+            <thead>
+              <tr>
+                <th>Request ID</th>
+                <th>User</th>
+                <th>Service</th>
+                <th>Cost</th>
+                <th>Governance Score</th>
+                <th>Requested Resources</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading &&
+                pendingRequests.map((request) => (
+                  <tr
+                    className="clickable-row"
+                    key={request.id}
+                    onClick={() => openRequest(request.id)}
+                  >
+                    <td>
+                      <strong>{shortId(request.id)}</strong>
+                      <small>{request.id}</small>
+                    </td>
+                    <td>{getRequestUser(request)}</td>
+                    <td>{request.request?.catalog_service_name || request.request?.app_tag || "-"}</td>
+                    <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
+                    <td>{request.policy?.governance_score ?? "-"}</td>
+                    <td>{formatRequestedResources(request.request)}</td>
+                    <td>
+                      <span className={`request-status ${normalizeStatus(request.status)}`}>
+                        {formatDecision(request.status)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              {!loading && pendingRequests.length === 0 && (
+                <tr>
+                  <td className="empty-state-cell" colSpan={7}>
+                    <div className="empty-state">
+                      <strong>No pending approvals</strong>
+                      <span>Auto-approved, rejected, and provisioned requests do not appear here.</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <AdminRequestDetailsPanel
+          actionLoading={actionLoading}
+          loading={detailsLoading}
+          onApprove={approveRequest}
+          onClose={() => setSelectedRequest(null)}
+          onReject={rejectRequest}
+          rejectReason={rejectReason}
+          request={selectedRequest}
+          setRejectReason={setRejectReason}
+        />
+      </div>
+    </section>
+  );
+}
+
+function AdminRequestDetailsPanel({
+  actionLoading,
+  loading,
+  onApprove,
+  onClose,
+  onReject,
+  rejectReason,
+  request,
+  setRejectReason,
+}) {
+  if (!request && !loading) {
+    return (
+      <aside className="request-details-panel empty-panel">
+        <p className="eyebrow">Approval</p>
+        <h3>Select a request</h3>
+        <p className="dashboard-copy">Click a pending request to review and decide.</p>
+      </aside>
+    );
+  }
+
+  if (loading) {
+    return (
+      <aside className="request-details-panel empty-panel">
+        <span className="spinner" />
+        <p>Loading request details...</p>
+      </aside>
+    );
+  }
+
+  const policy = request.policy ?? {};
+  const payload = request.request ?? {};
+  const canAct = request.status === "approval_required";
+
+  return (
+    <aside className="request-details-panel admin-details-panel">
+      <div className="request-details-header">
+        <div>
+          <p className="eyebrow">Approval</p>
+          <h3>{payload.catalog_service_name || payload.name || shortId(request.id)}</h3>
+        </div>
+        <button onClick={onClose} type="button">
+          Close
+        </button>
+      </div>
+
+      <dl className="request-result-details">
+        <Detail label="Request ID" value={request.id} />
+        <Detail label="User" value={getRequestUser(request)} />
+        <Detail label="Status" value={formatDecision(request.status)} />
+        <Detail label="Service" value={payload.catalog_service_name || payload.app_tag} />
+        <Detail label="Estimated cost" value={`${formatCurrency(policy.estimated_monthly_cost)} / month`} />
+        <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
+        <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
+        <Detail label="Resources" value={formatRequestedResources(payload)} />
+      </dl>
+
+      <section className="details-section">
+        <h4>Governance Explanation</h4>
+        {policy.reasons?.length > 0 ? (
+          <ul className="governance-reasons">
+            {policy.reasons.map((reason) => (
+              <li className="warning" key={reason}>
+                <span>!</span>
+                {reason}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="dashboard-copy">No policy concerns detected.</p>
+        )}
+      </section>
+
+      <JsonBlock title="Full Request" value={payload} />
+      <JsonBlock title="Policy Evaluation" value={policy} />
+
+      {canAct && (
+        <section className="approval-actions">
+          <label>
+            Reject reason
+            <textarea
+              onChange={(event) => setRejectReason(event.target.value)}
+              placeholder="Optional reason for rejection"
+              rows={4}
+              value={rejectReason}
+            />
+          </label>
+          <div className="button-row">
+            <button
+              className="primary"
+              disabled={Boolean(actionLoading)}
+              onClick={onApprove}
+              type="button"
+            >
+              {actionLoading === "approve" ? "Approving..." : "Approve"}
+            </button>
+            <button
+              className="danger"
+              disabled={Boolean(actionLoading)}
+              onClick={onReject}
+              type="button"
+            >
+              {actionLoading === "reject" ? "Rejecting..." : "Reject"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {request.server && <JsonBlock title="Created VM / Server" value={request.server} />}
+      {request.rejection_reason && (
+        <p className="request-result-note">Rejected: {request.rejection_reason}</p>
+      )}
+    </aside>
   );
 }
 
@@ -1399,6 +1682,19 @@ function formatDateTime(value) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function getRequestUser(request) {
+  const payload = request?.request ?? {};
+  return payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
+}
+
+function formatRequestedResources(payload) {
+  if (!payload) {
+    return "-";
+  }
+
+  return `${payload.cpu ?? "-"} vCPU / ${payload.ram_gb ?? "-"} GB RAM / ${payload.disk_gb ?? "-"} GB disk`;
 }
 
 function buildCreateFormInitialValues(

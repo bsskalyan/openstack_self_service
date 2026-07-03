@@ -326,6 +326,13 @@ class OpenStackService:
     def list_vm_requests(self) -> list[dict[str, Any]]:
         return self._request_store.list_requests()
 
+    def list_pending_vm_requests(self) -> list[dict[str, Any]]:
+        return [
+            record
+            for record in self._request_store.list_requests()
+            if record.get("status") == "approval_required"
+        ]
+
     def get_vm_request(self, request_id: str) -> dict[str, Any]:
         return self._get_request_or_raise(request_id)
 

@@ -50,6 +50,14 @@ export const api = {
     }),
   listVmRequests: () => request("/openstack/requests"),
   getVmRequest: (requestId) => request(`/openstack/requests/${requestId}`),
+  listPendingVmRequests: () => request("/openstack/requests/pending"),
+  approveVmRequest: (requestId) =>
+    request(`/openstack/requests/${requestId}/approve`, { method: "POST" }),
+  rejectVmRequest: (requestId, reason) =>
+    request(`/openstack/requests/${requestId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
   startServer: (serverId) =>
     request(`/openstack/servers/${serverId}/start`, { method: "POST" }),
   stopServer: (serverId) =>
