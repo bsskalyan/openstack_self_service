@@ -37,6 +37,18 @@ const lifetimeOptions = [
   { label: "90 Days", value: "90_days", days: 90 },
   { label: "Permanent", value: "permanent", days: 0 },
 ];
+const packageOptions = [
+  "Docker",
+  "Podman",
+  "Nginx",
+  "Apache",
+  "Node.js",
+  "Python",
+  "PostgreSQL",
+  "MySQL",
+  "Git",
+  "Ansible",
+];
 
 const emptyCreateForm = {
   project_name: "",
@@ -60,7 +72,7 @@ const emptyCreateForm = {
   cost_center: "",
   lifetime: "30_days",
   lifetime_days: "30",
-  packages: "",
+  packages: [],
   public_ip_required: false,
   estimated_monthly_cost: "",
   risk_level: "",
@@ -647,6 +659,7 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                 <th>Estimated Cost</th>
                 <th>Environment</th>
                 <th>Lifetime</th>
+                <th>Packages</th>
                 <th>Created Time</th>
                 <th>Provider</th>
               </tr>
@@ -674,13 +687,14 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                     <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
+                    <td>{formatPackages(request.request?.packages)}</td>
                     <td>{formatDateTime(request.created_at)}</td>
                     <td>OpenStack</td>
                   </tr>
                 ))}
               {!loading && requests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={10}>
+                  <td className="empty-state-cell" colSpan={11}>
                     <div className="empty-state">
                       <strong>No requests found</strong>
                       <span>Submit a catalog request to see it here.</span>
@@ -806,6 +820,7 @@ function AdminApprovalDashboard({
                 <th>Governance Score</th>
                 <th>Environment</th>
                 <th>Lifetime</th>
+                <th>Packages</th>
                 <th>Requested Resources</th>
                 <th>Status</th>
               </tr>
@@ -828,6 +843,7 @@ function AdminApprovalDashboard({
                     <td>{request.policy?.governance_score ?? "-"}</td>
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
+                    <td>{formatPackages(request.request?.packages)}</td>
                     <td>{formatRequestedResources(request.request)}</td>
                     <td>
                       <span className={`request-status ${normalizeStatus(request.status)}`}>
@@ -838,7 +854,7 @@ function AdminApprovalDashboard({
                 ))}
               {!loading && pendingRequests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={9}>
+                  <td className="empty-state-cell" colSpan={10}>
                     <div className="empty-state">
                       <strong>No pending approvals</strong>
                       <span>Auto-approved, rejected, and provisioned requests do not appear here.</span>
@@ -923,6 +939,7 @@ function AdminRequestDetailsPanel({
         <Detail label="Environment" value={formatEnvironment(payload.environment)} />
         <Detail label="Lifetime" value={formatLifetime(payload)} />
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
+        <Detail label="Packages" value={formatPackages(payload.packages)} />
         <Detail label="Estimated cost" value={`${formatCurrency(policy.estimated_monthly_cost)} / month`} />
         <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
@@ -1026,6 +1043,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Environment" value={formatEnvironment(payload.environment)} />
         <Detail label="Lifetime" value={formatLifetime(payload)} />
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
+        <Detail label="Packages" value={formatPackages(payload.packages)} />
         <Detail label="Provider" value="OpenStack" />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
         <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
@@ -1537,6 +1555,20 @@ function CreateVmForm({
 
   function updateField(event) {
     const { checked, name, type, value } = event.target;
+    if (name === "packages") {
+      setForm((current) => {
+        const packages = new Set(current.packages);
+        if (checked) {
+          packages.add(value);
+        } else {
+          packages.delete(value);
+        }
+
+        return { ...current, packages: Array.from(packages) };
+      });
+      return;
+    }
+
     setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
   }
 
@@ -1814,15 +1846,23 @@ function CreateVmForm({
           App tag
           <input name="app_tag" onChange={updateField} required value={form.app_tag} />
         </label>
-        <label>
-          Packages
-          <input
-            name="packages"
-            onChange={updateField}
-            placeholder="python, git, docker"
-            value={form.packages}
-          />
-        </label>
+        <section className="business-info-section">
+          <h3>Additional Packages</h3>
+          <div className="package-checkbox-grid">
+            {packageOptions.map((packageName) => (
+              <label className="checkbox-label package-checkbox" key={packageName}>
+                <input
+                  checked={form.packages.includes(packageName)}
+                  name="packages"
+                  onChange={updateField}
+                  type="checkbox"
+                  value={packageName}
+                />
+                {packageName}
+              </label>
+            ))}
+          </div>
+        </section>
         <label>
           Estimated cost
           <input
@@ -1875,6 +1915,7 @@ function RequestSubmissionResult({ result }) {
         <Detail label="Environment" value={formatEnvironment(result.request?.environment)} />
         <Detail label="Lifetime" value={formatLifetime(result.request)} />
         <Detail label="Expires at" value={formatDateTime(result.expires_at)} />
+        <Detail label="Packages" value={formatPackages(result.request?.packages)} />
         <Detail label="Approval decision" value={formatDecision(result.policy?.final_decision)} />
         <Detail label="Governance score" value={result.policy?.governance_score} />
         <Detail
@@ -2384,6 +2425,29 @@ function formatLifetime(payload) {
   return Number.isFinite(days) ? `${days} Day${days === 1 ? "" : "s"}` : "-";
 }
 
+function normalizePackageSelection(packages) {
+  const values = Array.isArray(packages) ? packages : [];
+  const aliases = new Map(
+    packageOptions.map((packageName) => [
+      packageName.toLowerCase().replaceAll(".", "").replaceAll("-", ""),
+      packageName,
+    ]),
+  );
+  aliases.set("nodejs", "Node.js");
+  aliases.set("node", "Node.js");
+  aliases.set("postgres", "PostgreSQL");
+  aliases.set("postgresql", "PostgreSQL");
+  aliases.set("mysql", "MySQL");
+
+  return Array.from(new Set(values
+    .map((item) => aliases.get(String(item).toLowerCase().replaceAll(".", "").replaceAll("-", "")))
+    .filter(Boolean)));
+}
+
+function formatPackages(packages) {
+  return Array.isArray(packages) && packages.length > 0 ? packages.join(", ") : "-";
+}
+
 function formatRequestedResources(payload) {
   if (!payload) {
     return "-";
@@ -2570,7 +2634,7 @@ function buildCatalogRequestDefaults(service) {
     app_tag: service.app_tag,
     lifetime: "30_days",
     lifetime_days: "30",
-    packages: service.packages.join(", "),
+    packages: normalizePackageSelection(service.packages),
     public_ip_required: service.public_ip_required,
     estimated_monthly_cost: String(service.estimated_monthly_cost ?? ""),
     risk_level: service.risk_level ?? "",
@@ -2592,10 +2656,7 @@ function buildVmRequestPayload(form) {
     cost_center: form.cost_center,
     lifetime: form.lifetime,
     lifetime_days: getLifetimeDays(form.lifetime),
-    packages: form.packages
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    packages: form.packages,
     public_ip_required: form.public_ip_required,
     project_name: form.project_name,
     business_unit: form.business_unit.trim() || null,
@@ -2683,6 +2744,10 @@ function evaluateGovernancePreview(form) {
   const publicIpRequired = Boolean(form.public_ip_required);
   const isProduction = environment === "production" || environment === "prod";
   const isPermanent = form.lifetime === "permanent" || getLifetimeDays(form.lifetime) === 0;
+  const selectedPackages = new Set((form.packages || []).map((packageName) => packageName.toLowerCase()));
+  const hasDatabasePackage = selectedPackages.has("postgresql") || selectedPackages.has("mysql");
+  const hasPublicWebPackage =
+    publicIpRequired && (selectedPackages.has("nginx") || selectedPackages.has("apache"));
   const catalogCost = Number(form.estimated_monthly_cost);
   const estimatedMonthlyCost = Number.isFinite(catalogCost) && catalogCost > 0
     ? catalogCost
@@ -2727,6 +2792,16 @@ function evaluateGovernancePreview(form) {
   if (diskGb > 200) {
     score += 20;
     reasons.push("Disk size is greater than 200GB");
+  }
+
+  if (hasDatabasePackage) {
+    score += 10;
+    reasons.push("Database package selected");
+  }
+
+  if (hasPublicWebPackage) {
+    score += 15;
+    reasons.push("Web-facing package selected with public IP");
   }
 
   let governanceDecision =

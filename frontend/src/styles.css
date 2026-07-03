@@ -1028,6 +1028,20 @@ label {
   width: auto;
 }
 
+.package-checkbox-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.package-checkbox {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
 input,
 select,
 textarea {
@@ -1380,6 +1394,7 @@ input[readonly] {
   .nav-tabs,
   .form-grid,
   .inline-form,
+  .package-checkbox-grid,
   .requests-layout {
     grid-template-columns: 1fr;
   }

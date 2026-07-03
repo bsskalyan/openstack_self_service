@@ -7,6 +7,11 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
     environment = request.environment.lower()
     is_production = environment in {"prod", "production"}
     is_permanent = request.lifetime == "permanent" or request.lifetime_days == 0
+    selected_packages = {package.lower() for package in request.packages}
+    has_database_package = bool(selected_packages & {"postgresql", "mysql"})
+    has_public_web_package = request.public_ip_required and bool(
+        selected_packages & {"nginx", "apache"}
+    )
 
     basic_auto_approved = (
         request.cpu <= 6
@@ -41,6 +46,14 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
     if request.disk_gb > 200:
         governance_score += 20
         reasons.append("Disk size is greater than 200GB")
+
+    if has_database_package:
+        governance_score += 10
+        reasons.append("Database package selected")
+
+    if has_public_web_package:
+        governance_score += 15
+        reasons.append("Web-facing package selected with public IP")
 
     if governance_score <= 30:
         governance_decision = "auto_provision"

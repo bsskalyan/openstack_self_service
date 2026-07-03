@@ -298,7 +298,8 @@ class OpenStackService:
             status="submitted",
             message=(
                 f"Request '{request.application_name or request.name}' submitted "
-                f"for {request.environment} with {self._format_lifetime(request)} lifetime"
+                f"for {request.environment} with {self._format_lifetime(request)} lifetime "
+                f"and packages: {self._format_packages(request)}"
             ),
         )
         self._record_audit_event(
@@ -311,7 +312,8 @@ class OpenStackService:
             status=policy_result.final_decision,
             message=(
                 f"Policy evaluated with governance score {policy_result.governance_score} "
-                f"for {request.environment} / {self._format_lifetime(request)}"
+                f"for {request.environment} / {self._format_lifetime(request)} / "
+                f"packages: {self._format_packages(request)}"
             ),
         )
 
@@ -339,7 +341,10 @@ class OpenStackService:
                     self._activity_entry(
                         action="submitted",
                         status="approval_required",
-                        message="Request submitted and routed for approval",
+                        message=(
+                            "Request submitted and routed for approval "
+                            f"with packages: {self._format_packages(request)}"
+                        ),
                         created_at=now,
                     ),
                 ],
@@ -413,7 +418,10 @@ class OpenStackService:
                     self._activity_entry(
                         action="submitted",
                         status="auto_approved",
-                        message="Request submitted and auto-approved by policy",
+                        message=(
+                            "Request submitted and auto-approved by policy "
+                            f"with packages: {self._format_packages(request)}"
+                        ),
                         created_at=now,
                     ),
                     self._activity_entry(
@@ -460,7 +468,10 @@ class OpenStackService:
                 self._activity_entry(
                     action="submitted",
                     status="auto_approved",
-                    message="Request submitted and auto-approved by policy",
+                    message=(
+                        "Request submitted and auto-approved by policy "
+                        f"with packages: {self._format_packages(request)}"
+                    ),
                     created_at=now,
                 ),
                 self._activity_entry(
@@ -1026,6 +1037,10 @@ class OpenStackService:
             30: "30 Days",
             90: "90 Days",
         }.get(request.lifetime_days, f"{request.lifetime_days} Days")
+
+    @staticmethod
+    def _format_packages(request: OpenStackVMRequest) -> str:
+        return ", ".join(request.packages) if request.packages else "None"
 
     @staticmethod
     def _extract_resource_id(resource: Any) -> str | None:

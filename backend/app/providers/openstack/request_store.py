@@ -61,6 +61,7 @@ class OpenStackRequestStore:
         request.setdefault("application_type", None)
         request.setdefault("purpose_description", None)
         request.setdefault("lifetime", cls._normalize_lifetime(request.get("lifetime_days")))
+        request["packages"] = cls._normalize_packages(request.get("packages"))
 
         return {**record, "request": request, "expires_at": record.get("expires_at")}
 
@@ -80,6 +81,39 @@ class OpenStackRequestStore:
             30: "30_days",
             90: "90_days",
         }.get(days, "30_days")
+
+    @staticmethod
+    def _normalize_packages(packages: Any) -> list[str]:
+        if isinstance(packages, str):
+            values = [item.strip() for item in packages.split(",")]
+        elif isinstance(packages, list):
+            values = [str(item).strip() for item in packages]
+        else:
+            values = []
+
+        aliases = {
+            "docker": "Docker",
+            "podman": "Podman",
+            "nginx": "Nginx",
+            "apache": "Apache",
+            "nodejs": "Node.js",
+            "node.js": "Node.js",
+            "node": "Node.js",
+            "python": "Python",
+            "postgresql": "PostgreSQL",
+            "postgres": "PostgreSQL",
+            "mysql": "MySQL",
+            "git": "Git",
+            "ansible": "Ansible",
+        }
+
+        normalized: list[str] = []
+        for value in values:
+            package = aliases.get(value.lower().replace("-", "").replace("_", ""))
+            if package and package not in normalized:
+                normalized.append(package)
+
+        return normalized
 
     def _write(self, records: list[dict[str, Any]]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
