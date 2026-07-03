@@ -22,8 +22,46 @@ const tabs = [
   { id: "floatingIps", label: "Floating IPs", roles: ["engineer", "admin", "viewer"] },
 ];
 
+const environmentOptions = [
+  { label: "Development", value: "development" },
+  { label: "Test", value: "test" },
+  { label: "QA", value: "qa" },
+  { label: "UAT", value: "uat" },
+  { label: "Production", value: "production" },
+];
+
+const applicationTypeOptions = ["Web", "API", "Database", "Batch", "AI/ML", "Other"];
+
+const lifetimeOptions = [
+  { label: "1 Day", value: "1_day", days: 1 },
+  { label: "7 Days", value: "7_days", days: 7 },
+  { label: "30 Days", value: "30_days", days: 30 },
+  { label: "90 Days", value: "90_days", days: 90 },
+  { label: "Permanent", value: "permanent", days: 3650 },
+];
+
+const packageOptions = [
+  "Docker",
+  "Podman",
+  "Nginx",
+  "Apache",
+  "Node.js",
+  "Python",
+  "PostgreSQL",
+  "MySQL",
+  "Git",
+  "Ansible",
+];
+
 const emptyCreateForm = {
   name: "",
+  project_name: "",
+  business_unit: "",
+  application_name: "",
+  application_type: "Web",
+  purpose_description: "",
+  request_owner: "",
+  team_name: "",
   image_id: "",
   flavor_id: "",
   network_id: "",
@@ -32,11 +70,13 @@ const emptyCreateForm = {
   cpu: "",
   ram_gb: "",
   disk_gb: "",
-  environment: "dev",
+  environment: "development",
   app_tag: "",
   cost_center: "",
+  lifetime: "30_days",
   lifetime_days: "30",
-  packages: "",
+  packages: [],
+  operating_system_template: "",
   public_ip_required: false,
   estimated_monthly_cost: "",
   risk_level: "",
@@ -1500,8 +1540,29 @@ function CreateVmForm({
   }, [flavors, images, initialValues, keypairs, networks, providerReachable, securityGroups]);
 
   function updateField(event) {
-    const { checked, name, type, value } = event.target;
-    setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
+    const { checked, name, options, type, value } = event.target;
+    const nextValue =
+      type === "checkbox"
+        ? checked
+        : event.target.multiple
+          ? Array.from(options)
+              .filter((option) => option.selected)
+              .map((option) => option.value)
+          : value;
+
+    setForm((current) => {
+      const next = { ...current, [name]: nextValue };
+      if (name === "lifetime") {
+        next.lifetime_days = String(lifetimeOptions.find((option) => option.value === value)?.days ?? 30);
+      }
+      if (name === "application_name" && !current.name) {
+        next.name = slugify(value);
+      }
+      if (name === "application_name" && !current.app_tag) {
+        next.app_tag = slugify(value);
+      }
+      return next;
+    });
   }
 
   async function submit(event) {
@@ -1537,230 +1598,281 @@ function CreateVmForm({
       {!canSubmit && (
         <div className="alert warning">Not authorized: viewers cannot create VM requests.</div>
       )}
-      <form className="form-grid" onSubmit={submit}>
-        <label>
-          Name
-          <input name="name" onChange={updateField} required value={form.name} />
-        </label>
-        <label>
-          Image
-          <select
-            disabled={providerSelectionDisabled}
-            name="image_id"
-            onChange={updateField}
-            required
-            value={form.image_id}
-          >
-            <option value="">Select image</option>
+      <form className="cms-request-form" onSubmit={submit}>
+        <FormSection title="General">
+          <label>
+            Project Name
+            <input name="project_name" onChange={updateField} required value={form.project_name} />
+          </label>
+          <label>
+            Cost Center
+            <input name="cost_center" onChange={updateField} required value={form.cost_center} />
+          </label>
+          <label>
+            Business Unit
+            <input name="business_unit" onChange={updateField} value={form.business_unit} />
+          </label>
+          <label>
+            Environment
+            <select name="environment" onChange={updateField} required value={form.environment}>
+              {environmentOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Application Name
+            <input
+              name="application_name"
+              onChange={updateField}
+              required
+              value={form.application_name}
+            />
+          </label>
+          <label>
+            Application Type
+            <select name="application_type" onChange={updateField} required value={form.application_type}>
+              {applicationTypeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="span-2">
+            Purpose / Description
+            <textarea
+              name="purpose_description"
+              onChange={updateField}
+              rows={4}
+              value={form.purpose_description}
+            />
+          </label>
+        </FormSection>
+
+        <FormSection title="Ownership">
+          <label>
+            Request Owner
+            <input name="request_owner" onChange={updateField} required value={form.request_owner} />
+          </label>
+          <label>
+            Team Name
+            <input name="team_name" onChange={updateField} required value={form.team_name} />
+          </label>
+        </FormSection>
+
+        <FormSection title="Lifecycle">
+          <label>
+            Lifetime
+            <select name="lifetime" onChange={updateField} required value={form.lifetime}>
+              {lifetimeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </FormSection>
+
+        <FormSection title="Provisioning">
+          <label>
+            VM Name
+            <input name="name" onChange={updateField} required value={form.name} />
+          </label>
+          <label>
+            Operating System Template
+            <select
+              disabled={providerSelectionDisabled}
+              name="image_id"
+              onChange={updateField}
+              required
+              value={form.image_id}
+            >
+              <option value="">Select operating system template</option>
+              {providerSelectionDisabled && (
+                <option value="auto:image">Selected automatically</option>
+              )}
+              {images.map((image) => (
+                <option key={image.id} value={image.id}>
+                  {image.name || image.id}
+                </option>
+              ))}
+            </select>
             {providerSelectionDisabled && (
-              <option value="auto:image">Selected automatically</option>
+              <span className="field-hint">
+                Will be selected automatically when the provider becomes available.
+              </span>
             )}
-            {images.map((image) => (
-              <option key={image.id} value={image.id}>
-                {image.name || image.id}
-              </option>
-            ))}
-          </select>
-          {providerSelectionDisabled && (
-            <span className="field-hint">
-              Will be selected automatically when the provider becomes available.
-            </span>
-          )}
-        </label>
-        <label>
-          Flavor
-          <select
-            disabled={providerSelectionDisabled}
-            name="flavor_id"
-            onChange={updateField}
-            required
-            value={form.flavor_id}
-          >
-            <option value="">Select flavor</option>
-            {providerSelectionDisabled && (
-              <option value="auto:flavor">Selected automatically</option>
-            )}
-            {flavors.map((flavor) => (
-              <option key={flavor.id} value={flavor.id}>
-                {flavor.name || flavor.id}
-              </option>
-            ))}
-          </select>
-          {providerSelectionDisabled && (
-            <span className="field-hint">
-              Will be selected automatically when the provider becomes available.
-            </span>
-          )}
-        </label>
-        <label>
-          Network
-          <select
-            disabled={providerSelectionDisabled}
-            name="network_id"
-            onChange={updateField}
-            required
-            value={form.network_id}
-          >
-            <option value="">Select network</option>
-            {providerSelectionDisabled && (
-              <option value="auto:network">Selected automatically</option>
-            )}
-            {networks.map((network) => (
-              <option key={network.id} value={network.id}>
-                {network.name || network.id}
-              </option>
-            ))}
-          </select>
-          {providerSelectionDisabled && (
-            <span className="field-hint">
-              Will be selected automatically when the provider becomes available.
-            </span>
-          )}
-        </label>
-        <label>
-          Keypair
-          <select
-            disabled={providerSelectionDisabled}
-            name="key_name"
-            onChange={updateField}
-            value={form.key_name}
-          >
-            <option value="">No keypair</option>
-            {providerSelectionDisabled && (
-              <option value="auto:keypair">Selected automatically</option>
-            )}
-            {keypairs.map((keypair) => (
-              <option key={keypair.name} value={keypair.name}>
-                {keypair.name}
-              </option>
-            ))}
-          </select>
-          {providerSelectionDisabled && (
-            <span className="field-hint">
-              Will be selected automatically when the provider becomes available.
-            </span>
-          )}
-        </label>
-        <label>
-          Security group
-          <select
-            disabled={providerSelectionDisabled}
-            name="security_group_id"
-            onChange={updateField}
-            value={form.security_group_id}
-          >
-            <option value="">No security group</option>
-            {providerSelectionDisabled && (
-              <option value="auto:security-group">Selected automatically</option>
-            )}
-            {securityGroups.map((securityGroup) => (
-              <option key={securityGroup.id} value={securityGroup.id}>
-                {securityGroup.name || securityGroup.id}
-              </option>
-            ))}
-          </select>
-          {providerSelectionDisabled && (
-            <span className="field-hint">
-              Will be selected automatically when the provider becomes available.
-            </span>
-          )}
-        </label>
-        <label>
-          CPU
-          <input min="1" name="cpu" onChange={updateField} required type="number" value={form.cpu} />
-        </label>
-        <label>
-          RAM GB
-          <input
-            min="1"
-            name="ram_gb"
-            onChange={updateField}
-            required
-            type="number"
-            value={form.ram_gb}
-          />
-        </label>
-        <label>
-          Disk GB
-          <input
-            min="1"
-            name="disk_gb"
-            onChange={updateField}
-            required
-            type="number"
-            value={form.disk_gb}
-          />
-        </label>
-        <label>
-          Environment
-          <select name="environment" onChange={updateField} required value={form.environment}>
-            <option value="dev">dev</option>
-            <option value="test">test</option>
-            <option value="stage">stage</option>
-            <option value="prod">prod</option>
-          </select>
-        </label>
-        <label>
-          App tag
-          <input name="app_tag" onChange={updateField} required value={form.app_tag} />
-        </label>
-        <label>
-          Cost center
-          <input name="cost_center" onChange={updateField} required value={form.cost_center} />
-        </label>
-        <label>
-          Lifetime days
-          <input
-            min="1"
-            name="lifetime_days"
-            onChange={updateField}
-            required
-            type="number"
-            value={form.lifetime_days}
-          />
-        </label>
-        <label>
-          Packages
-          <input
-            name="packages"
-            onChange={updateField}
-            placeholder="python, git, docker"
-            value={form.packages}
-          />
-        </label>
-        <label>
-          Estimated cost
-          <input
-            name="estimated_monthly_cost"
-            onChange={updateField}
-            readOnly
-            value={
-              form.estimated_monthly_cost
-                ? formatCurrency(Number(form.estimated_monthly_cost))
-                : ""
-            }
-          />
-        </label>
-        <label>
-          Risk level
-          <input name="risk_level" onChange={updateField} readOnly value={form.risk_level} />
-        </label>
-        <label className="checkbox-label">
-          <input
-            checked={form.public_ip_required}
-            name="public_ip_required"
-            onChange={updateField}
-            type="checkbox"
-          />
-          Public IP required
-        </label>
-        <GovernancePreview evaluation={governance} serviceName={form.catalog_service_name} />
+          </label>
+          <label>
+            Flavor
+            <select
+              disabled={providerSelectionDisabled}
+              name="flavor_id"
+              onChange={updateField}
+              required
+              value={form.flavor_id}
+            >
+              <option value="">Select flavor</option>
+              {providerSelectionDisabled && (
+                <option value="auto:flavor">Selected automatically</option>
+              )}
+              {flavors.map((flavor) => (
+                <option key={flavor.id} value={flavor.id}>
+                  {flavor.name || flavor.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Network
+            <select
+              disabled={providerSelectionDisabled}
+              name="network_id"
+              onChange={updateField}
+              required
+              value={form.network_id}
+            >
+              <option value="">Select network</option>
+              {providerSelectionDisabled && (
+                <option value="auto:network">Selected automatically</option>
+              )}
+              {networks.map((network) => (
+                <option key={network.id} value={network.id}>
+                  {network.name || network.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Keypair
+            <select
+              disabled={providerSelectionDisabled}
+              name="key_name"
+              onChange={updateField}
+              value={form.key_name}
+            >
+              <option value="">No keypair</option>
+              {providerSelectionDisabled && (
+                <option value="auto:keypair">Selected automatically</option>
+              )}
+              {keypairs.map((keypair) => (
+                <option key={keypair.name} value={keypair.name}>
+                  {keypair.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Security Group
+            <select
+              disabled={providerSelectionDisabled}
+              name="security_group_id"
+              onChange={updateField}
+              value={form.security_group_id}
+            >
+              <option value="">No security group</option>
+              {providerSelectionDisabled && (
+                <option value="auto:security-group">Selected automatically</option>
+              )}
+              {securityGroups.map((securityGroup) => (
+                <option key={securityGroup.id} value={securityGroup.id}>
+                  {securityGroup.name || securityGroup.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            CPU
+            <input min="1" name="cpu" onChange={updateField} required type="number" value={form.cpu} />
+          </label>
+          <label>
+            RAM GB
+            <input min="1" name="ram_gb" onChange={updateField} required type="number" value={form.ram_gb} />
+          </label>
+          <label>
+            Disk GB
+            <input min="1" name="disk_gb" onChange={updateField} required type="number" value={form.disk_gb} />
+          </label>
+          <label>
+            Additional Packages
+            <select multiple name="packages" onChange={updateField} value={form.packages}>
+              {packageOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">Hold Ctrl or Shift to select multiple packages.</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              checked={form.public_ip_required}
+              name="public_ip_required"
+              onChange={updateField}
+              type="checkbox"
+            />
+            Public IP required
+          </label>
+        </FormSection>
+
+        <FormSection title="Governance">
+          <GovernancePreview evaluation={governance} serviceName={form.catalog_service_name} />
+        </FormSection>
+
+        <FormSection title="Summary">
+          <RequestSummary form={form} governance={governance} />
+        </FormSection>
+
         <button className="primary form-submit" disabled={saving || !canSubmit} type="submit">
           {saving ? "Submitting..." : "Submit Request"}
         </button>
       </form>
       {lastSubmission && <RequestSubmissionResult result={lastSubmission} />}
     </section>
+  );
+}
+
+function FormSection({ children, title }) {
+  return (
+    <section className="form-section">
+      <h3>{title}</h3>
+      <div className="form-section-grid">{children}</div>
+    </section>
+  );
+}
+
+function RequestSummary({ form, governance }) {
+  const lifetimeLabel =
+    lifetimeOptions.find((option) => option.value === form.lifetime)?.label ?? form.lifetime;
+  const environmentLabel =
+    environmentOptions.find((option) => option.value === form.environment)?.label ?? form.environment;
+
+  return (
+    <div className="request-summary">
+      <dl>
+        <Detail label="Project Name" value={form.project_name} />
+        <Detail label="Cost Center" value={form.cost_center} />
+        <Detail label="Business Unit" value={form.business_unit} />
+        <Detail label="Environment" value={environmentLabel} />
+        <Detail label="Application Name" value={form.application_name} />
+        <Detail label="Application Type" value={form.application_type} />
+        <Detail label="Request Owner" value={form.request_owner} />
+        <Detail label="Team Name" value={form.team_name} />
+        <Detail label="Lifetime" value={lifetimeLabel} />
+        <Detail label="VM Name" value={form.name} />
+        <Detail label="CPU / RAM / Disk" value={`${form.cpu || "-"} vCPU / ${form.ram_gb || "-"} GB / ${form.disk_gb || "-"} GB`} />
+        <Detail label="Operating System Template" value={form.image_id} />
+        <Detail label="Packages" value={form.packages.length ? form.packages.join(", ") : "None"} />
+        <Detail label="Public IP" value={form.public_ip_required ? "Required" : "Not required"} />
+        <Detail label="Governance Score" value={`${governance.score} / 100`} />
+      </dl>
+      {form.purpose_description && (
+        <p className="summary-description">{form.purpose_description}</p>
+      )}
+    </div>
   );
 }
 
@@ -2231,7 +2343,7 @@ function formatDateTime(value) {
 
 function getRequestUser(request) {
   const payload = request?.request ?? {};
-  return payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
+  return payload.request_owner || payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
 }
 
 function formatRequestedResources(payload) {
@@ -2324,7 +2436,16 @@ function buildCreateFormInitialValues(
   initialValues,
   { flavors, images, keypairs, networks, providerReachable, securityGroups },
 ) {
-  const nextValues = { ...emptyCreateForm, ...initialValues };
+  const nextValues = {
+    ...emptyCreateForm,
+    ...initialValues,
+    packages: Array.isArray(initialValues.packages)
+      ? initialValues.packages
+      : String(initialValues.packages || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+  };
 
   if (!nextValues.catalog_service_name) {
     return nextValues;
@@ -2410,21 +2531,72 @@ function selectDefaultKeypair(keypairs) {
 }
 
 function buildCatalogRequestDefaults(service) {
+  const environment = normalizeEnvironmentValue(service.environment);
+  const packages = (service.packages ?? []).map(toPackageLabel).filter(Boolean);
+
   return {
     ...emptyCreateForm,
     name: service.id,
+    project_name: service.name ?? "",
+    application_name: service.name ?? "",
+    application_type: inferApplicationType(service.name),
     cpu: String(service.recommended_cpu),
     ram_gb: String(service.recommended_ram_gb),
     disk_gb: String(service.recommended_disk_gb),
-    environment: service.environment,
+    environment,
     app_tag: service.app_tag,
+    lifetime: "30_days",
     lifetime_days: "30",
-    packages: service.packages.join(", "),
+    packages,
+    operating_system_template: service.name ?? "",
     public_ip_required: service.public_ip_required,
     estimated_monthly_cost: String(service.estimated_monthly_cost ?? ""),
     risk_level: service.risk_level ?? "",
     catalog_service_name: service.name ?? "",
   };
+}
+
+function normalizeEnvironmentValue(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "prod") {
+    return "production";
+  }
+  if (normalized === "stage") {
+    return "uat";
+  }
+  return environmentOptions.some((option) => option.value === normalized)
+    ? normalized
+    : "development";
+}
+
+function toPackageLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  return packageOptions.find((option) => option.toLowerCase() === normalized) ?? "";
+}
+
+function inferApplicationType(name) {
+  const normalized = String(name || "").toLowerCase();
+  if (normalized.includes("postgres") || normalized.includes("mysql") || normalized.includes("database")) {
+    return "Database";
+  }
+  if (normalized.includes("ai") || normalized.includes("ml")) {
+    return "AI/ML";
+  }
+  if (normalized.includes("api")) {
+    return "API";
+  }
+  if (normalized.includes("batch")) {
+    return "Batch";
+  }
+  return "Web";
+}
+
+function slugify(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function buildVmRequestPayload(form) {
@@ -2437,14 +2609,20 @@ function buildVmRequestPayload(form) {
     ram_gb: Number(form.ram_gb),
     disk_gb: Number(form.disk_gb),
     environment: form.environment,
-    app_tag: form.app_tag,
+    app_tag: form.app_tag || slugify(form.application_name),
     cost_center: form.cost_center,
     lifetime_days: Number(form.lifetime_days),
-    packages: form.packages
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    packages: form.packages,
     public_ip_required: form.public_ip_required,
+    project_name: form.project_name,
+    business_unit: form.business_unit.trim() || null,
+    application_name: form.application_name,
+    application_type: form.application_type,
+    purpose_description: form.purpose_description.trim() || null,
+    request_owner: form.request_owner,
+    team_name: form.team_name,
+    lifetime: form.lifetime,
+    operating_system_template: form.operating_system_template || form.image_id,
   };
 
   if (form.security_group_id.trim()) {
@@ -2521,7 +2699,9 @@ function evaluateGovernancePreview(form) {
   const ramGb = Number(form.ram_gb || 0);
   const diskGb = Number(form.disk_gb || 0);
   const environment = String(form.environment || "").toLowerCase();
+  const permanentLifetime = form.lifetime === "permanent";
   const publicIpRequired = Boolean(form.public_ip_required);
+  const largeVm = cpu > 6 || ramGb > 12 || diskGb > 200;
   const catalogCost = Number(form.estimated_monthly_cost);
   const estimatedMonthlyCost = Number.isFinite(catalogCost) && catalogCost > 0
     ? catalogCost
@@ -2532,7 +2712,8 @@ function evaluateGovernancePreview(form) {
     cpu <= 6 &&
     ramGb <= 12 &&
     diskGb <= 200 &&
-    environment !== "prod" &&
+    !isProductionEnvironment(environment) &&
+    !permanentLifetime &&
     !publicIpRequired;
 
   let score = 0;
@@ -2547,19 +2728,24 @@ function evaluateGovernancePreview(form) {
     reasons.push("Public IP requested");
   }
 
-  if (environment === "prod") {
+  if (isProductionEnvironment(environment)) {
     score += 20;
     reasons.push("Production workload");
+  }
+
+  if (permanentLifetime) {
+    score += 20;
+    reasons.push("Permanent lifetime requested");
+  }
+
+  if (largeVm) {
+    score += 20;
+    reasons.push("Large VM requested");
   }
 
   if (isCustomImage(form.image_id)) {
     score += 15;
     reasons.push("Custom image requested");
-  }
-
-  if (diskGb > 200) {
-    score += 20;
-    reasons.push("Disk size is greater than 200GB");
   }
 
   const governanceDecision =
@@ -2586,6 +2772,10 @@ function evaluateGovernancePreview(form) {
 function isCustomImage(imageId) {
   const normalized = String(imageId || "").toLowerCase();
   return normalized.startsWith("custom:") || normalized.includes("custom");
+}
+
+function isProductionEnvironment(environment) {
+  return String(environment || "").toLowerCase() === "production";
 }
 
 function formatDecision(value) {

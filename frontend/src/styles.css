@@ -1010,6 +1010,56 @@ td small {
   padding: 18px;
 }
 
+.cms-request-form {
+  display: grid;
+  gap: 18px;
+}
+
+.form-section {
+  background: #ffffff;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.form-section h3 {
+  margin: 0 0 14px;
+}
+
+.form-section-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.form-section select[multiple] {
+  min-height: 160px;
+}
+
+.request-summary {
+  grid-column: 1 / -1;
+}
+
+.request-summary dl {
+  display: grid;
+  gap: 10px 18px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 0;
+}
+
+.summary-description {
+  background: #f8fafc;
+  border: 1px solid #e6ebf2;
+  border-radius: 6px;
+  color: #43516a;
+  margin: 14px 0 0;
+  padding: 10px;
+}
+
 label {
   color: #43516a;
   display: grid;

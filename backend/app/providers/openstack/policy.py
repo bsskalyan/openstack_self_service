@@ -4,12 +4,16 @@ from app.providers.openstack.schemas import OpenStackRequestPolicyResult, OpenSt
 def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyResult:
     estimated_monthly_cost = estimate_monthly_cost(request)
     reasons: list[str] = []
+    production_workload = is_production_environment(request.environment)
+    permanent_lifetime = is_permanent_lifetime(request)
+    large_vm = is_large_vm(request)
 
     basic_auto_approved = (
         request.cpu <= 6
         and request.ram_gb <= 12
         and request.disk_gb <= 200
-        and request.environment.lower() != "prod"
+        and not production_workload
+        and not permanent_lifetime
         and request.public_ip_required is False
     )
 
@@ -22,17 +26,21 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
         governance_score += 30
         reasons.append("Public IP requested")
 
-    if request.environment.lower() == "prod":
+    if production_workload:
         governance_score += 20
         reasons.append("Production workload")
+
+    if permanent_lifetime:
+        governance_score += 20
+        reasons.append("Permanent lifetime requested")
+
+    if large_vm:
+        governance_score += 20
+        reasons.append("Large VM requested")
 
     if is_custom_image(request.image_id):
         governance_score += 15
         reasons.append("Custom image requested")
-
-    if request.disk_gb > 200:
-        governance_score += 20
-        reasons.append("Disk size is greater than 200GB")
 
     if governance_score <= 30:
         governance_decision = "auto_provision"
@@ -69,3 +77,15 @@ def estimate_monthly_cost(request: OpenStackVMRequest) -> float:
 def is_custom_image(image_id: str) -> bool:
     normalized = image_id.lower()
     return normalized.startswith("custom:") or "custom" in normalized
+
+
+def is_production_environment(environment: str) -> bool:
+    return environment.lower() in {"prod", "production"}
+
+
+def is_permanent_lifetime(request: OpenStackVMRequest) -> bool:
+    return str(request.lifetime or "").lower() == "permanent"
+
+
+def is_large_vm(request: OpenStackVMRequest) -> bool:
+    return request.cpu > 6 or request.ram_gb > 12 or request.disk_gb > 200
