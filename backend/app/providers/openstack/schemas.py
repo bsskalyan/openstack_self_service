@@ -169,6 +169,9 @@ class OpenStackVMRequest(BaseModel):
     business_unit: str | None = Field(default=None, min_length=1)
     request_owner: str = Field(..., min_length=1)
     team_name: str | None = Field(default=None, min_length=1)
+    application_name: str = Field(..., min_length=1)
+    application_type: str | None = Field(default=None, min_length=1)
+    purpose_description: str | None = Field(default=None, min_length=1)
 
 
 class OpenStackRequestPolicyResult(BaseModel):

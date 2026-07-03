@@ -296,7 +296,7 @@ class OpenStackService:
             resource_id=request_id,
             request_id=request_id,
             status="submitted",
-            message=f"Request '{request.name}' submitted",
+            message=f"Request '{request.application_name or request.name}' submitted",
         )
         self._record_audit_event(
             actor="system",

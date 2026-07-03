@@ -57,6 +57,9 @@ class OpenStackRequestStore:
         request.setdefault("request_owner", record.get("owner") or request.get("cost_center") or "Legacy Owner")
         request.setdefault("business_unit", None)
         request.setdefault("team_name", None)
+        request.setdefault("application_name", request.get("app_tag") or request.get("name") or "Legacy Application")
+        request.setdefault("application_type", None)
+        request.setdefault("purpose_description", None)
 
         return {**record, "request": request}
 

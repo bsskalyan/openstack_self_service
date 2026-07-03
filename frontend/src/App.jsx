@@ -22,11 +22,16 @@ const tabs = [
   { id: "floatingIps", label: "Floating IPs", roles: ["engineer", "admin", "viewer"] },
 ];
 
+const applicationTypeOptions = ["Web", "API", "Database", "Batch", "AI/ML", "Other"];
+
 const emptyCreateForm = {
   project_name: "",
   business_unit: "",
   request_owner: "",
   team_name: "",
+  application_name: "",
+  application_type: "Web",
+  purpose_description: "",
   name: "",
   image_id: "",
   flavor_id: "",
@@ -641,7 +646,7 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                       <strong>{shortId(request.id)}</strong>
                       <small>{request.id}</small>
                     </td>
-                    <td>{request.request?.catalog_service_name || request.request?.app_tag || "-"}</td>
+                    <td>{getRequestServiceName(request)}</td>
                     <td>
                       <span className={`request-status ${normalizeStatus(request.status)}`}>
                         {formatDecision(request.status)}
@@ -797,7 +802,7 @@ function AdminApprovalDashboard({
                       <small>{request.id}</small>
                     </td>
                     <td>{getRequestUser(request)}</td>
-                    <td>{request.request?.catalog_service_name || request.request?.app_tag || "-"}</td>
+                    <td>{getRequestServiceName(request)}</td>
                     <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
                     <td>{request.policy?.governance_score ?? "-"}</td>
                     <td>{formatRequestedResources(request.request)}</td>
@@ -877,7 +882,7 @@ function AdminRequestDetailsPanel({
       <div className="request-details-header">
         <div>
           <p className="eyebrow">Approval</p>
-          <h3>{payload.catalog_service_name || payload.name || shortId(request.id)}</h3>
+          <h3>{payload.catalog_service_name || payload.application_name || payload.name || shortId(request.id)}</h3>
         </div>
         <button onClick={onClose} type="button">
           Close
@@ -888,7 +893,10 @@ function AdminRequestDetailsPanel({
         <Detail label="Request ID" value={request.id} />
         <Detail label="User" value={getRequestUser(request)} />
         <Detail label="Status" value={formatDecision(request.status)} />
-        <Detail label="Service" value={payload.catalog_service_name || payload.app_tag} />
+        <Detail label="Service" value={payload.catalog_service_name || payload.application_name || payload.app_tag} />
+        <Detail label="Application Name" value={payload.application_name} />
+        <Detail label="Application Type" value={payload.application_type} />
+        <Detail label="Purpose" value={payload.purpose_description} />
         <Detail label="Estimated cost" value={`${formatCurrency(policy.estimated_monthly_cost)} / month`} />
         <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
@@ -975,7 +983,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
       <div className="request-details-header">
         <div>
           <p className="eyebrow">Details</p>
-          <h3>{payload.name || shortId(request.id)}</h3>
+          <h3>{payload.application_name || payload.name || shortId(request.id)}</h3>
         </div>
         <button onClick={onClose} type="button">
           Close
@@ -986,6 +994,9 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Request ID" value={request.id} />
         <Detail label="Status" value={formatDecision(request.status)} />
         <Detail label="Selected service" value={payload.catalog_service_name} />
+        <Detail label="Application Name" value={payload.application_name} />
+        <Detail label="Application Type" value={payload.application_type} />
+        <Detail label="Purpose" value={payload.purpose_description} />
         <Detail label="Provider" value="OpenStack" />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
         <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
@@ -1556,6 +1567,39 @@ function CreateVmForm({
             <label>
               Team Name
               <input name="team_name" onChange={updateField} value={form.team_name} />
+            </label>
+          </div>
+        </section>
+        <section className="business-info-section">
+          <h3>Application Information</h3>
+          <div className="business-info-grid">
+            <label>
+              Application Name
+              <input
+                name="application_name"
+                onChange={updateField}
+                required
+                value={form.application_name}
+              />
+            </label>
+            <label>
+              Application Type
+              <select name="application_type" onChange={updateField} value={form.application_type}>
+                {applicationTypeOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="span-2">
+              Purpose / Description
+              <textarea
+                name="purpose_description"
+                onChange={updateField}
+                rows={4}
+                value={form.purpose_description}
+              />
             </label>
           </div>
         </section>
@@ -2251,6 +2295,11 @@ function getRequestUser(request) {
   return payload.request_owner || payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
 }
 
+function getRequestServiceName(request) {
+  const payload = request?.request ?? {};
+  return payload.catalog_service_name || payload.application_name || payload.app_tag || "-";
+}
+
 function formatRequestedResources(payload) {
   if (!payload) {
     return "-";
@@ -2466,6 +2515,9 @@ function buildVmRequestPayload(form) {
     business_unit: form.business_unit.trim() || null,
     request_owner: form.request_owner,
     team_name: form.team_name.trim() || null,
+    application_name: form.application_name,
+    application_type: form.application_type,
+    purpose_description: form.purpose_description.trim() || null,
   };
 
   if (form.security_group_id.trim()) {
