@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 class OpenStackServiceError(Exception):
     """Raised when OpenStack operations fail."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failure_details = failure_details
+
 
 class OpenStackConfigurationError(OpenStackServiceError):
     """Raised when required OpenStack configuration is missing."""
@@ -167,6 +176,7 @@ class OpenStackService:
                     "updated_at": self._serialize_value(getattr(server, "updated_at", None)),
                     "vm_state": getattr(server, "vm_state", None),
                     "metadata": getattr(server, "metadata", None),
+                    "failure_details": self._extract_server_failure_details(server),
                 }
                 for server in self.get_connection().compute.servers(details=True)
             ]
@@ -260,8 +270,10 @@ class OpenStackService:
             return self._serialize_server_summary(server)
         except SDKException as exc:
             logger.exception("Failed to create OpenStack server name='%s'", name)
+            failure_details = self._build_failure_details(exc)
             raise OpenStackServiceError(
-                f"Failed to create OpenStack server: {self._format_openstack_error(exc)}",
+                failure_details["user_message"],
+                failure_details=failure_details,
             ) from exc
 
     def submit_vm_request(
@@ -317,6 +329,7 @@ class OpenStackService:
                 ),
             )
         except OpenStackServiceError as exc:
+            failure_details = exc.failure_details or self._build_failure_details(exc)
             record = self._build_request_record(
                 request_id=request_id,
                 request=request,
@@ -326,7 +339,8 @@ class OpenStackService:
                 owner_role=owner_role,
                 created_at=now,
                 updated_at=self._now(),
-                provisioning_error=str(exc),
+                provisioning_error=failure_details["user_message"],
+                failure_details=failure_details,
                 activity_log=[
                     self._activity_entry(
                         action="submitted",
@@ -337,7 +351,7 @@ class OpenStackService:
                     self._activity_entry(
                         action="draft_saved",
                         status="draft",
-                        message=f"Provisioning deferred: {exc}",
+                        message=f"Provisioning deferred: {failure_details['user_message']}",
                         created_at=self._now(),
                     ),
                 ],
@@ -626,7 +640,11 @@ class OpenStackService:
             return connection
         except SDKException as exc:
             logger.exception("Failed to create OpenStack connection")
-            raise OpenStackServiceError("Failed to create OpenStack connection") from exc
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
 
     def _validate_configuration(self) -> None:
         missing_settings = [
@@ -665,6 +683,7 @@ class OpenStackService:
         owner_role: str | None = None,
         server: dict[str, Any] | None = None,
         provisioning_error: str | None = None,
+        failure_details: dict[str, Any] | None = None,
         activity_log: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
@@ -677,6 +696,7 @@ class OpenStackService:
             "server": server,
             "rejection_reason": None,
             "provisioning_error": provisioning_error,
+            "failure_details": failure_details,
             "activity_log": activity_log or [],
             "created_at": created_at,
             "updated_at": updated_at,
@@ -773,6 +793,7 @@ class OpenStackService:
             "image_id": OpenStackService._extract_server_image_id(server),
             "flavor_id": OpenStackService._extract_server_flavor_id(server),
             "metadata": getattr(server, "metadata", None),
+            "failure_details": OpenStackService._extract_server_failure_details(server),
         }
 
     @staticmethod
@@ -865,3 +886,110 @@ class OpenStackService:
     @staticmethod
     def _format_openstack_error(exc: SDKException) -> str:
         return str(exc) or exc.__class__.__name__
+
+    @staticmethod
+    def _extract_server_failure_details(server: Any) -> dict[str, Any] | None:
+        status = str(getattr(server, "status", "") or "").upper()
+        fault = getattr(server, "fault", None)
+        if status != "ERROR" and not fault:
+            return None
+
+        raw_error = OpenStackService._serialize_fault(fault) if fault else None
+        technical_reason = OpenStackService._fault_message(raw_error) or "Server entered ERROR state"
+        return OpenStackService._translate_failure(
+            technical_reason=technical_reason,
+            raw_error=raw_error,
+        )
+
+    @staticmethod
+    def _build_failure_details(exc: Exception) -> dict[str, Any]:
+        technical_reason = OpenStackService._format_openstack_error(exc) if isinstance(exc, SDKException) else str(exc)
+        raw_error = {
+            "type": exc.__class__.__name__,
+            "message": technical_reason,
+        }
+        status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+        if status_code:
+            raw_error["status_code"] = status_code
+
+        details = getattr(exc, "details", None)
+        if details:
+            raw_error["details"] = details
+
+        return OpenStackService._translate_failure(
+            technical_reason=technical_reason,
+            raw_error=raw_error,
+        )
+
+    @staticmethod
+    def _translate_failure(
+        *,
+        technical_reason: str,
+        raw_error: Any,
+    ) -> dict[str, Any]:
+        normalized = technical_reason.lower()
+        user_message = "OpenStack could not provision this VM."
+        suggested_action = "Review the technical details or contact your cloud administrator."
+
+        if "no valid host" in normalized:
+            user_message = "Insufficient compute resources."
+            suggested_action = "Try a smaller flavor or ask an administrator to add compute capacity."
+        elif "image" in normalized and ("not found" in normalized or "could not be found" in normalized):
+            user_message = "Selected image is unavailable."
+            suggested_action = "Choose another image and submit the request again."
+        elif "flavor" in normalized and ("not found" in normalized or "could not be found" in normalized):
+            user_message = "Selected flavor is unavailable."
+            suggested_action = "Choose another flavor and submit the request again."
+        elif "network" in normalized and ("not found" in normalized or "could not be found" in normalized):
+            user_message = "Selected network is unavailable."
+            suggested_action = "Choose another network or ask an administrator to verify network access."
+        elif "quota" in normalized or "overlimit" in normalized or "exceeded" in normalized:
+            user_message = "Project quota exceeded."
+            suggested_action = "Request a smaller VM or ask an administrator to increase project quota."
+        elif (
+            "connection" in normalized
+            or "connect" in normalized
+            or "timeout" in normalized
+            or "timed out" in normalized
+            or "unreachable" in normalized
+            or "failed to create openstack connection" in normalized
+        ):
+            user_message = "OpenStack provider is unreachable."
+            suggested_action = "Check OpenStack connectivity and try again."
+
+        return {
+            "user_message": user_message,
+            "technical_reason": technical_reason,
+            "suggested_action": suggested_action,
+            "raw_error": raw_error,
+        }
+
+    @staticmethod
+    def _serialize_fault(fault: Any) -> Any:
+        if fault is None:
+            return None
+
+        if isinstance(fault, dict):
+            return fault
+
+        if hasattr(fault, "to_dict"):
+            return fault.to_dict()
+
+        return {
+            key: OpenStackService._serialize_value(value)
+            for key, value in vars(fault).items()
+            if not key.startswith("_")
+        } or str(fault)
+
+    @staticmethod
+    def _fault_message(raw_error: Any) -> str | None:
+        if isinstance(raw_error, dict):
+            for key in ("message", "faultstring", "details", "code"):
+                value = raw_error.get(key)
+                if value:
+                    return str(value)
+
+        if raw_error:
+            return str(raw_error)
+
+        return None

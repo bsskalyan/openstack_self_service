@@ -61,24 +61,26 @@ def get_openstack_provider() -> OpenStackProvider:
 
 
 def handle_openstack_error(operation: str, exc: OpenStackServiceError) -> HTTPException:
+    detail: str | dict[str, Any] = exc.failure_details or str(exc)
+
     if isinstance(exc, OpenStackRequestNotFoundError):
         logger.warning("%s failed because the request was not found: %s", operation, exc)
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
+            detail=detail,
         )
 
     if isinstance(exc, OpenStackConfigurationError):
         logger.warning("%s failed due to OpenStack configuration: %s", operation, exc)
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=detail,
         )
 
     logger.warning("%s failed: %s", operation, exc)
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        detail=str(exc),
+        detail=detail,
     )
 
 

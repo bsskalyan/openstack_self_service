@@ -89,6 +89,7 @@ class OpenStackServerResponse(BaseModel):
     updated_at: str | None
     vm_state: str | None
     metadata: dict[str, Any] | None = None
+    failure_details: dict[str, Any] | None = None
 
 
 class OpenStackCreateServerRequest(BaseModel):
@@ -108,6 +109,7 @@ class OpenStackCreateServerResponse(BaseModel):
     image_id: str | None
     flavor_id: str | None
     metadata: dict[str, Any] | None = None
+    failure_details: dict[str, Any] | None = None
 
 
 class OpenStackServerLifecycleResponse(BaseModel):
@@ -196,6 +198,7 @@ class OpenStackVMRequestRecord(BaseModel):
     server: dict[str, Any] | None = None
     rejection_reason: str | None = None
     provisioning_error: str | None = None
+    failure_details: dict[str, Any] | None = None
     activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -210,6 +213,7 @@ class OpenStackVMRequestResponse(BaseModel):
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest
     provisioning_error: str | None = None
+    failure_details: dict[str, Any] | None = None
     activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
     created_at: str
     updated_at: str

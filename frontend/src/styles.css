@@ -720,6 +720,68 @@ td small {
   gap: 8px;
 }
 
+.link-button {
+  background: transparent;
+  border: 0;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: auto;
+  padding: 0;
+}
+
+.link-button:hover {
+  background: transparent;
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.error-link {
+  color: #b42318;
+  display: block;
+  margin-top: 6px;
+}
+
+.failure-panel {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #7c2d12;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.failure-panel h4 {
+  color: #9a3412;
+  margin: 0;
+}
+
+.failure-panel p {
+  margin: 0;
+}
+
+.failure-panel details {
+  background: #ffffff;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.failure-panel summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.failure-panel pre {
+  background: #111827;
+  border-radius: 6px;
+  color: #f9fafb;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(15, 23, 42, 0.42);

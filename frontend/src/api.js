@@ -24,7 +24,13 @@ async function request(path, options = {}) {
     let message = `Request failed with status ${response.status}`;
     try {
       const payload = await response.json();
-      message = payload.detail ?? message;
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      } else if (payload.detail?.user_message) {
+        message = payload.detail.user_message;
+      } else {
+        message = payload.detail?.technical_reason ?? message;
+      }
     } catch {
       const text = await response.text();
       message = text || message;

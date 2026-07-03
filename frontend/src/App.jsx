@@ -808,6 +808,7 @@ function AdminRequestDetailsPanel({
   const policy = request.policy ?? {};
   const payload = request.request ?? {};
   const cost = getCostBreakdown(payload, policy);
+  const failure = getFailureDetails(request);
   const canAct = request.status === "approval_required";
 
   return (
@@ -834,6 +835,7 @@ function AdminRequestDetailsPanel({
       </dl>
 
       <LifecycleTimeline request={request} />
+      {failure && <FailureNotice failure={failure} />}
       <GovernanceExplanation policy={policy} request={payload} />
       <CostBreakdown cost={cost} />
 
@@ -930,6 +932,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
       </dl>
 
       <LifecycleTimeline request={request} />
+      {failure && <FailureNotice failure={failure} />}
       <GovernanceExplanation policy={policy} request={payload} />
       <CostBreakdown cost={cost} />
 
@@ -938,7 +941,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
       <JsonBlock title="Created VM / Server" value={request.server} />
       <ActivityLog entries={request.activity_log} />
 
-      {request.provisioning_error && (
+      {!failure && request.provisioning_error && (
         <p className="request-result-note">{request.provisioning_error}</p>
       )}
     </aside>
@@ -950,6 +953,27 @@ function JsonBlock({ title, value }) {
     <section className="details-section">
       <h4>{title}</h4>
       <pre>{JSON.stringify(value ?? null, null, 2)}</pre>
+    </section>
+  );
+}
+
+function FailureNotice({ failure }) {
+  if (!failure) {
+    return null;
+  }
+
+  return (
+    <section className="failure-panel">
+      <p className="eyebrow">Provisioning Error</p>
+      <h4>{failure.user_message}</h4>
+      <p>{failure.suggested_action}</p>
+      <details>
+        <summary>Admin/debug technical details</summary>
+        <dl>
+          <Detail label="Technical reason" value={failure.technical_reason} />
+        </dl>
+        <pre>{JSON.stringify(failure.raw_error ?? null, null, 2)}</pre>
+      </details>
     </section>
   );
 }
@@ -1172,6 +1196,7 @@ function ServersList({
               {!loading &&
                 servers.map((server) => {
                   const ips = getServerIps(server.addresses);
+                  const failure = getFailureDetails(server);
                   const actionsAllowed =
                     providerReachable && canManageServer(server, currentUser, vmRequests);
                   return (
@@ -1184,6 +1209,15 @@ function ServersList({
                         <span className={`server-status ${normalizeStatus(server.status)}`}>
                           {server.status ?? "unknown"}
                         </span>
+                        {failure && (
+                          <button
+                            className="link-button error-link"
+                            onClick={() => setSelectedServer(server)}
+                            type="button"
+                          >
+                            View Error
+                          </button>
+                        )}
                       </td>
                       <td>{server.image_id ?? "-"}</td>
                       <td>{server.flavor_id ?? "-"}</td>
@@ -1293,6 +1327,7 @@ function ServerDetailsPanel({ onClose, server }) {
   }
 
   const ips = getServerIps(server.addresses);
+  const failure = getFailureDetails(server);
 
   return (
     <aside className="request-details-panel server-details-panel">
@@ -1321,6 +1356,7 @@ function ServerDetailsPanel({ onClose, server }) {
         <Detail label="Updated" value={formatDateTime(server.updated_at)} />
       </dl>
 
+      {failure && <FailureNotice failure={failure} />}
       <JsonBlock title="Addresses" value={server.addresses} />
       <JsonBlock title="Raw Server Data" value={server} />
     </aside>
@@ -2007,6 +2043,31 @@ function isPrivateIp(ipAddress) {
 
 function normalizeStatus(status) {
   return String(status ?? "unknown").toLowerCase().replaceAll(" ", "-");
+}
+
+function getFailureDetails(source) {
+  if (!source) {
+    return null;
+  }
+
+  if (source.failure_details) {
+    return source.failure_details;
+  }
+
+  if (source.server?.failure_details) {
+    return source.server.failure_details;
+  }
+
+  if (source.provisioning_error) {
+    return {
+      user_message: source.provisioning_error,
+      suggested_action: "Review the request or try again after the provider issue is resolved.",
+      technical_reason: source.provisioning_error,
+      raw_error: null,
+    };
+  }
+
+  return null;
 }
 
 function canAccessTab(tabId, role) {
