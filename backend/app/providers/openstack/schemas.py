@@ -161,7 +161,8 @@ class OpenStackVMRequest(BaseModel):
     environment: str = Field(..., min_length=1)
     app_tag: str = Field(..., min_length=1)
     cost_center: str = Field(..., min_length=1)
-    lifetime_days: int = Field(..., ge=1)
+    lifetime_days: int = Field(..., ge=0)
+    lifetime: Literal["1_day", "7_days", "30_days", "90_days", "permanent"] = "30_days"
     packages: list[str] = Field(default_factory=list)
     public_ip_required: bool = False
     catalog_service_name: str | None = Field(default=None, min_length=1)
@@ -220,6 +221,7 @@ class OpenStackVMRequestRecord(BaseModel):
     provisioning_error: str | None = None
     failure_details: dict[str, Any] | None = None
     activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
+    expires_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -235,6 +237,7 @@ class OpenStackVMRequestResponse(BaseModel):
     provisioning_error: str | None = None
     failure_details: dict[str, Any] | None = None
     activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
+    expires_at: str | None = None
     created_at: str
     updated_at: str
 

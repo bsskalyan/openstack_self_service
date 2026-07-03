@@ -4,13 +4,17 @@ from app.providers.openstack.schemas import OpenStackRequestPolicyResult, OpenSt
 def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyResult:
     estimated_monthly_cost = estimate_monthly_cost(request)
     reasons: list[str] = []
+    environment = request.environment.lower()
+    is_production = environment in {"prod", "production"}
+    is_permanent = request.lifetime == "permanent" or request.lifetime_days == 0
 
     basic_auto_approved = (
         request.cpu <= 6
         and request.ram_gb <= 12
         and request.disk_gb <= 200
-        and request.environment.lower() != "prod"
+        and not is_production
         and request.public_ip_required is False
+        and not is_permanent
     )
 
     governance_score = 0
@@ -22,9 +26,13 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
         governance_score += 30
         reasons.append("Public IP requested")
 
-    if request.environment.lower() == "prod":
+    if is_production:
         governance_score += 20
         reasons.append("Production workload")
+
+    if is_permanent:
+        governance_score += 20
+        reasons.append("Permanent lifetime requested")
 
     if is_custom_image(request.image_id):
         governance_score += 15
@@ -40,6 +48,14 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
         governance_decision = "auto_provision_notify"
     else:
         governance_decision = "approval_required"
+
+    if is_production and request.public_ip_required:
+        governance_decision = "approval_required"
+        reasons.append("Production workloads with a public IP require approval")
+
+    if is_production and is_permanent:
+        governance_decision = "approval_required"
+        reasons.append("Permanent production workloads require approval")
 
     final_decision = (
         "auto_approved"

@@ -47,8 +47,8 @@ class OpenStackRequestStore:
 
         return [self._normalize_record(record) for record in records]
 
-    @staticmethod
-    def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def _normalize_record(cls, record: dict[str, Any]) -> dict[str, Any]:
         request = dict(record.get("request") or {})
         request.setdefault(
             "project_name",
@@ -60,8 +60,26 @@ class OpenStackRequestStore:
         request.setdefault("application_name", request.get("app_tag") or request.get("name") or "Legacy Application")
         request.setdefault("application_type", None)
         request.setdefault("purpose_description", None)
+        request.setdefault("lifetime", cls._normalize_lifetime(request.get("lifetime_days")))
 
-        return {**record, "request": request}
+        return {**record, "request": request, "expires_at": record.get("expires_at")}
+
+    @staticmethod
+    def _normalize_lifetime(lifetime_days: Any) -> str:
+        try:
+            days = int(lifetime_days)
+        except (TypeError, ValueError):
+            days = 30
+
+        if days == 0:
+            return "permanent"
+
+        return {
+            1: "1_day",
+            7: "7_days",
+            30: "30_days",
+            90: "90_days",
+        }.get(days, "30_days")
 
     def _write(self, records: list[dict[str, Any]]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

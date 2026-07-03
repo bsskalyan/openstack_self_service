@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -296,7 +296,10 @@ class OpenStackService:
             resource_id=request_id,
             request_id=request_id,
             status="submitted",
-            message=f"Request '{request.application_name or request.name}' submitted",
+            message=(
+                f"Request '{request.application_name or request.name}' submitted "
+                f"for {request.environment} with {self._format_lifetime(request)} lifetime"
+            ),
         )
         self._record_audit_event(
             actor="system",
@@ -306,7 +309,10 @@ class OpenStackService:
             resource_id=request_id,
             request_id=request_id,
             status=policy_result.final_decision,
-            message=f"Policy evaluated with governance score {policy_result.governance_score}",
+            message=(
+                f"Policy evaluated with governance score {policy_result.governance_score} "
+                f"for {request.environment} / {self._format_lifetime(request)}"
+            ),
         )
 
         if policy_result.final_decision == "approval_required":
@@ -929,6 +935,7 @@ class OpenStackService:
             "provisioning_error": provisioning_error,
             "failure_details": failure_details,
             "activity_log": activity_log or [],
+            "expires_at": OpenStackService._calculate_expires_at(created_at, request),
             "created_at": created_at,
             "updated_at": updated_at,
         }
@@ -999,6 +1006,26 @@ class OpenStackService:
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat()
+
+    @staticmethod
+    def _calculate_expires_at(created_at: str, request: OpenStackVMRequest) -> str | None:
+        if request.lifetime == "permanent" or request.lifetime_days == 0:
+            return None
+
+        created_datetime = datetime.fromisoformat(created_at)
+        return (created_datetime + timedelta(days=request.lifetime_days)).isoformat()
+
+    @staticmethod
+    def _format_lifetime(request: OpenStackVMRequest) -> str:
+        if request.lifetime == "permanent" or request.lifetime_days == 0:
+            return "Permanent"
+
+        return {
+            1: "1 Day",
+            7: "7 Days",
+            30: "30 Days",
+            90: "90 Days",
+        }.get(request.lifetime_days, f"{request.lifetime_days} Days")
 
     @staticmethod
     def _extract_resource_id(resource: Any) -> str | None:

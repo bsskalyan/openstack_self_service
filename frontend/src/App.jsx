@@ -23,6 +23,20 @@ const tabs = [
 ];
 
 const applicationTypeOptions = ["Web", "API", "Database", "Batch", "AI/ML", "Other"];
+const environmentOptions = [
+  { label: "Development", value: "Development" },
+  { label: "Test", value: "Test" },
+  { label: "QA", value: "QA" },
+  { label: "UAT", value: "UAT" },
+  { label: "Production", value: "Production" },
+];
+const lifetimeOptions = [
+  { label: "1 Day", value: "1_day", days: 1 },
+  { label: "7 Days", value: "7_days", days: 7 },
+  { label: "30 Days", value: "30_days", days: 30 },
+  { label: "90 Days", value: "90_days", days: 90 },
+  { label: "Permanent", value: "permanent", days: 0 },
+];
 
 const emptyCreateForm = {
   project_name: "",
@@ -41,9 +55,10 @@ const emptyCreateForm = {
   cpu: "",
   ram_gb: "",
   disk_gb: "",
-  environment: "dev",
+  environment: "Development",
   app_tag: "",
   cost_center: "",
+  lifetime: "30_days",
   lifetime_days: "30",
   packages: "",
   public_ip_required: false,
@@ -630,6 +645,8 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                 <th>Governance Score</th>
                 <th>Approval Decision</th>
                 <th>Estimated Cost</th>
+                <th>Environment</th>
+                <th>Lifetime</th>
                 <th>Created Time</th>
                 <th>Provider</th>
               </tr>
@@ -655,13 +672,15 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                     <td>{request.policy?.governance_score ?? "-"}</td>
                     <td>{formatDecision(request.policy?.final_decision)}</td>
                     <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
+                    <td>{formatEnvironment(request.request?.environment)}</td>
+                    <td>{formatLifetime(request.request)}</td>
                     <td>{formatDateTime(request.created_at)}</td>
                     <td>OpenStack</td>
                   </tr>
                 ))}
               {!loading && requests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={8}>
+                  <td className="empty-state-cell" colSpan={10}>
                     <div className="empty-state">
                       <strong>No requests found</strong>
                       <span>Submit a catalog request to see it here.</span>
@@ -785,6 +804,8 @@ function AdminApprovalDashboard({
                 <th>Service</th>
                 <th>Cost</th>
                 <th>Governance Score</th>
+                <th>Environment</th>
+                <th>Lifetime</th>
                 <th>Requested Resources</th>
                 <th>Status</th>
               </tr>
@@ -805,6 +826,8 @@ function AdminApprovalDashboard({
                     <td>{getRequestServiceName(request)}</td>
                     <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
                     <td>{request.policy?.governance_score ?? "-"}</td>
+                    <td>{formatEnvironment(request.request?.environment)}</td>
+                    <td>{formatLifetime(request.request)}</td>
                     <td>{formatRequestedResources(request.request)}</td>
                     <td>
                       <span className={`request-status ${normalizeStatus(request.status)}`}>
@@ -815,7 +838,7 @@ function AdminApprovalDashboard({
                 ))}
               {!loading && pendingRequests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={7}>
+                  <td className="empty-state-cell" colSpan={9}>
                     <div className="empty-state">
                       <strong>No pending approvals</strong>
                       <span>Auto-approved, rejected, and provisioned requests do not appear here.</span>
@@ -897,6 +920,9 @@ function AdminRequestDetailsPanel({
         <Detail label="Application Name" value={payload.application_name} />
         <Detail label="Application Type" value={payload.application_type} />
         <Detail label="Purpose" value={payload.purpose_description} />
+        <Detail label="Environment" value={formatEnvironment(payload.environment)} />
+        <Detail label="Lifetime" value={formatLifetime(payload)} />
+        <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Estimated cost" value={`${formatCurrency(policy.estimated_monthly_cost)} / month`} />
         <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
@@ -997,6 +1023,9 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Application Name" value={payload.application_name} />
         <Detail label="Application Type" value={payload.application_type} />
         <Detail label="Purpose" value={payload.purpose_description} />
+        <Detail label="Environment" value={formatEnvironment(payload.environment)} />
+        <Detail label="Lifetime" value={formatLifetime(payload)} />
+        <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Provider" value="OpenStack" />
         <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
         <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
@@ -1603,6 +1632,31 @@ function CreateVmForm({
             </label>
           </div>
         </section>
+        <section className="business-info-section">
+          <h3>Environment &amp; Lifecycle</h3>
+          <div className="business-info-grid">
+            <label>
+              Environment
+              <select name="environment" onChange={updateField} required value={form.environment}>
+                {environmentOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Lifetime
+              <select name="lifetime" onChange={updateField} required value={form.lifetime}>
+                {lifetimeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
         <label>
           Name
           <input name="name" onChange={updateField} required value={form.name} />
@@ -1757,28 +1811,8 @@ function CreateVmForm({
           />
         </label>
         <label>
-          Environment
-          <select name="environment" onChange={updateField} required value={form.environment}>
-            <option value="dev">dev</option>
-            <option value="test">test</option>
-            <option value="stage">stage</option>
-            <option value="prod">prod</option>
-          </select>
-        </label>
-        <label>
           App tag
           <input name="app_tag" onChange={updateField} required value={form.app_tag} />
-        </label>
-        <label>
-          Lifetime days
-          <input
-            min="1"
-            name="lifetime_days"
-            onChange={updateField}
-            required
-            type="number"
-            value={form.lifetime_days}
-          />
         </label>
         <label>
           Packages
@@ -1838,6 +1872,9 @@ function RequestSubmissionResult({ result }) {
         <Detail label="Request ID" value={result.id} />
         <Detail label="Status" value={formatDecision(result.status)} />
         <Detail label="Selected service" value={selectedCatalogItem} />
+        <Detail label="Environment" value={formatEnvironment(result.request?.environment)} />
+        <Detail label="Lifetime" value={formatLifetime(result.request)} />
+        <Detail label="Expires at" value={formatDateTime(result.expires_at)} />
         <Detail label="Approval decision" value={formatDecision(result.policy?.final_decision)} />
         <Detail label="Governance score" value={result.policy?.governance_score} />
         <Detail
@@ -2300,6 +2337,53 @@ function getRequestServiceName(request) {
   return payload.catalog_service_name || payload.application_name || payload.app_tag || "-";
 }
 
+function normalizeEnvironmentValue(value) {
+  const normalized = String(value || "").toLowerCase();
+  const aliases = {
+    dev: "Development",
+    development: "Development",
+    test: "Test",
+    qa: "QA",
+    stage: "UAT",
+    staging: "UAT",
+    uat: "UAT",
+    prod: "Production",
+    production: "Production",
+  };
+
+  return aliases[normalized] ?? "Development";
+}
+
+function formatEnvironment(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return normalizeEnvironmentValue(value);
+}
+
+function getLifetimeDays(lifetime) {
+  return lifetimeOptions.find((option) => option.value === lifetime)?.days ?? 30;
+}
+
+function formatLifetime(payload) {
+  if (!payload) {
+    return "-";
+  }
+
+  const selected = lifetimeOptions.find((option) => option.value === payload.lifetime);
+  if (selected) {
+    return selected.label;
+  }
+
+  const days = Number(payload.lifetime_days);
+  if (days === 0) {
+    return "Permanent";
+  }
+
+  return Number.isFinite(days) ? `${days} Day${days === 1 ? "" : "s"}` : "-";
+}
+
 function formatRequestedResources(payload) {
   if (!payload) {
     return "-";
@@ -2482,8 +2566,9 @@ function buildCatalogRequestDefaults(service) {
     cpu: String(service.recommended_cpu),
     ram_gb: String(service.recommended_ram_gb),
     disk_gb: String(service.recommended_disk_gb),
-    environment: service.environment,
+    environment: normalizeEnvironmentValue(service.environment),
     app_tag: service.app_tag,
+    lifetime: "30_days",
     lifetime_days: "30",
     packages: service.packages.join(", "),
     public_ip_required: service.public_ip_required,
@@ -2505,7 +2590,8 @@ function buildVmRequestPayload(form) {
     environment: form.environment,
     app_tag: form.app_tag,
     cost_center: form.cost_center,
-    lifetime_days: Number(form.lifetime_days),
+    lifetime: form.lifetime,
+    lifetime_days: getLifetimeDays(form.lifetime),
     packages: form.packages
       .split(",")
       .map((item) => item.trim())
@@ -2595,6 +2681,8 @@ function evaluateGovernancePreview(form) {
   const diskGb = Number(form.disk_gb || 0);
   const environment = String(form.environment || "").toLowerCase();
   const publicIpRequired = Boolean(form.public_ip_required);
+  const isProduction = environment === "production" || environment === "prod";
+  const isPermanent = form.lifetime === "permanent" || getLifetimeDays(form.lifetime) === 0;
   const catalogCost = Number(form.estimated_monthly_cost);
   const estimatedMonthlyCost = Number.isFinite(catalogCost) && catalogCost > 0
     ? catalogCost
@@ -2605,8 +2693,9 @@ function evaluateGovernancePreview(form) {
     cpu <= 6 &&
     ramGb <= 12 &&
     diskGb <= 200 &&
-    environment !== "prod" &&
-    !publicIpRequired;
+    !isProduction &&
+    !publicIpRequired &&
+    !isPermanent;
 
   let score = 0;
 
@@ -2620,9 +2709,14 @@ function evaluateGovernancePreview(form) {
     reasons.push("Public IP requested");
   }
 
-  if (environment === "prod") {
+  if (isProduction) {
     score += 20;
     reasons.push("Production workload");
+  }
+
+  if (isPermanent) {
+    score += 20;
+    reasons.push("Permanent lifetime requested");
   }
 
   if (isCustomImage(form.image_id)) {
@@ -2635,8 +2729,18 @@ function evaluateGovernancePreview(form) {
     reasons.push("Disk size is greater than 200GB");
   }
 
-  const governanceDecision =
+  let governanceDecision =
     score <= 30 ? "auto_provision" : score <= 60 ? "auto_provision_notify" : "approval_required";
+
+  if (isProduction && publicIpRequired) {
+    governanceDecision = "approval_required";
+    reasons.push("Production workloads with a public IP require approval");
+  }
+
+  if (isProduction && isPermanent) {
+    governanceDecision = "approval_required";
+    reasons.push("Permanent production workloads require approval");
+  }
   const finalDecision =
     basicAutoApproved && governanceDecision !== "approval_required"
       ? "auto_approved"
