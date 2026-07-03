@@ -171,6 +171,61 @@ button:disabled {
   padding: 16px;
 }
 
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.provider-selector {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.provider-selector span {
+  color: #65738a;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.provider-selector select {
+  min-height: 36px;
+  min-width: 220px;
+}
+
+.hero-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.provider-badge {
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #475467;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 4px 10px;
+}
+
+.provider-badge.enabled {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.provider-badge.disabled {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 h2,
 h3 {
   margin: 0;

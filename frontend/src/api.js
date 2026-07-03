@@ -29,6 +29,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  listProviders: () => request("/providers"),
   listCatalogServices: () => request("/catalog/services"),
   getStatus: () => request("/openstack/status"),
   listServers: () => request("/openstack/servers"),

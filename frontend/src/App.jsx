@@ -144,8 +144,26 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [notice, setNotice] = useState("");
   const [toasts, setToasts] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [selectedProviderId, setSelectedProviderId] = useState("openstack");
   const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
   const { data, loading, error, providerReachable, setError, refresh } = useOpenStackData();
+  const selectedProvider =
+    providers.find((provider) => provider.id === selectedProviderId) ??
+    providers.find((provider) => provider.id === "openstack") ?? {
+      id: "openstack",
+      name: "OpenStack",
+      status: "enabled",
+      enabled: true,
+      description: "OpenStack cloud provider",
+    };
+
+  useEffect(() => {
+    api.listProviders().then(
+      (value) => setProviders(value),
+      (err) => setError(`Providers failed: ${err.message}`),
+    );
+  }, [setError]);
 
   function showToast(message, type = "success") {
     const id = window.crypto?.randomUUID?.() ?? String(Date.now());
@@ -203,9 +221,16 @@ export default function App() {
             <p className="eyebrow">API</p>
             <strong>http://127.0.0.1:8000/api/v1</strong>
           </div>
-          <button className="primary" disabled={loading} onClick={refresh} type="button">
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
+          <div className="topbar-actions">
+            <ProviderSelector
+              providers={providers}
+              selectedProviderId={selectedProviderId}
+              onChange={setSelectedProviderId}
+            />
+            <button className="primary" disabled={loading} onClick={refresh} type="button">
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </header>
 
         {!providerReachable && (
@@ -215,7 +240,12 @@ export default function App() {
         {notice && <div className="alert success">{notice}</div>}
 
         {activeTab === "dashboard" && (
-          <Dashboard data={data} loading={loading} providerReachable={providerReachable} />
+          <Dashboard
+            data={data}
+            loading={loading}
+            providerReachable={providerReachable}
+            selectedProvider={selectedProvider}
+          />
         )}
         {activeTab === "catalog" && (
           <ServiceCatalog
@@ -225,6 +255,7 @@ export default function App() {
               setActiveTab("create");
               showToast(`${service.name} loaded into request form`, "success");
             }}
+            selectedProvider={selectedProvider}
             services={data.catalogServices}
           />
         )}
@@ -233,6 +264,7 @@ export default function App() {
             loading={loading}
             onError={setError}
             requests={data.vmRequests}
+            selectedProvider={selectedProvider}
           />
         )}
         {activeTab === "admin" && (
@@ -242,6 +274,7 @@ export default function App() {
             onRefresh={refresh}
             onToast={showToast}
             pendingRequests={data.pendingRequests}
+            selectedProvider={selectedProvider}
           />
         )}
         {activeTab === "servers" && (
@@ -249,6 +282,7 @@ export default function App() {
             loading={loading}
             providerReachable={providerReachable}
             servers={data.servers}
+            selectedProvider={selectedProvider}
             onAction={runAction}
           />
         )}
@@ -261,6 +295,7 @@ export default function App() {
             networks={data.networks}
             providerReachable={providerReachable}
             securityGroups={data.securityGroups}
+            selectedProvider={selectedProvider}
             onCreated={async (result) => {
               const message = getSubmissionMessage(result);
               setNotice(message);
@@ -293,7 +328,45 @@ export default function App() {
   );
 }
 
-function ServiceCatalog({ loading, onRequest, services }) {
+function ProviderSelector({ onChange, providers, selectedProviderId }) {
+  const options =
+    providers.length > 0
+      ? providers
+      : [
+          {
+            id: "openstack",
+            name: "OpenStack",
+            status: "enabled",
+            enabled: true,
+          },
+        ];
+
+  return (
+    <label className="provider-selector">
+      <span>Provider</span>
+      <select
+        onChange={(event) => onChange(event.target.value)}
+        value={selectedProviderId}
+      >
+        {options.map((provider) => (
+          <option disabled={!provider.enabled} key={provider.id} value={provider.id}>
+            {provider.name}: {provider.enabled ? "Enabled" : "Coming Soon"}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ProviderBadge({ provider }) {
+  return (
+    <span className={`provider-badge ${provider.enabled ? "enabled" : "disabled"}`}>
+      {provider.name} · {provider.enabled ? "Enabled" : "Coming Soon"}
+    </span>
+  );
+}
+
+function ServiceCatalog({ loading, onRequest, selectedProvider, services }) {
   return (
     <section className="catalog-page">
       <div className="dashboard-hero">
@@ -304,7 +377,10 @@ function ServiceCatalog({ loading, onRequest, services }) {
             Select a standard OpenStack service blueprint and submit it for policy review.
           </p>
         </div>
-        <span className="status-pill">{services.length} services</span>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className="status-pill">{services.length} services</span>
+        </div>
       </div>
 
       {loading && (
@@ -347,7 +423,7 @@ function ServiceCatalog({ loading, onRequest, services }) {
   );
 }
 
-function MyRequestsPage({ loading, onError, requests }) {
+function MyRequestsPage({ loading, onError, requests, selectedProvider }) {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
@@ -374,7 +450,10 @@ function MyRequestsPage({ loading, onError, requests }) {
             Review submitted service requests, policy decisions, and provisioning results.
           </p>
         </div>
-        <span className="status-pill">{requests.length} requests</span>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className="status-pill">{requests.length} requests</span>
+        </div>
       </div>
 
       <div className="requests-layout">
@@ -447,7 +526,14 @@ function MyRequestsPage({ loading, onError, requests }) {
   );
 }
 
-function AdminApprovalDashboard({ loading, onError, onRefresh, onToast, pendingRequests }) {
+function AdminApprovalDashboard({
+  loading,
+  onError,
+  onRefresh,
+  onToast,
+  pendingRequests,
+  selectedProvider,
+}) {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState("");
@@ -517,7 +603,10 @@ function AdminApprovalDashboard({ loading, onError, onRefresh, onToast, pendingR
             Review requests that require approval before OpenStack provisioning.
           </p>
         </div>
-        <span className="status-pill">{pendingRequests.length} pending</span>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className="status-pill">{pendingRequests.length} pending</span>
+        </div>
       </div>
 
       <div className="requests-layout">
@@ -788,7 +877,7 @@ function JsonBlock({ title, value }) {
   );
 }
 
-function Dashboard({ data, loading, providerReachable }) {
+function Dashboard({ data, loading, providerReachable, selectedProvider }) {
   const status = providerReachable
     ? data.status?.status ?? (loading ? "loading" : "unknown")
     : "unavailable";
@@ -836,7 +925,10 @@ function Dashboard({ data, loading, providerReachable }) {
             Live OpenStack resource counts from the self-service API.
           </p>
         </div>
-        <span className={`status-pill ${status}`}>{status}</span>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className={`status-pill ${status}`}>{status}</span>
+        </div>
       </div>
       <div className="metric-grid">
         {cards.map((card) => (
@@ -856,7 +948,7 @@ function Dashboard({ data, loading, providerReachable }) {
   );
 }
 
-function ServersList({ loading, providerReachable, servers, onAction }) {
+function ServersList({ loading, providerReachable, selectedProvider, servers, onAction }) {
   const [pendingServer, setPendingServer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -880,7 +972,10 @@ function ServersList({ loading, providerReachable, servers, onAction }) {
             View instances and run lifecycle actions against existing backend APIs.
           </p>
         </div>
-        <span className="status-pill">{servers.length} servers</span>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className="status-pill">{servers.length} servers</span>
+        </div>
       </div>
 
       <div className="server-table-card">
@@ -1016,6 +1111,7 @@ function CreateVmForm({
   networks,
   providerReachable,
   securityGroups,
+  selectedProvider,
   onCreated,
   onError,
 }) {
@@ -1064,6 +1160,7 @@ function CreateVmForm({
     <section>
       <div className="section-title">
         <h2>VM Request</h2>
+        <ProviderBadge provider={selectedProvider} />
       </div>
       <form className="form-grid" onSubmit={submit}>
         <label>
