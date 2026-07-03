@@ -23,6 +23,10 @@ const tabs = [
 ];
 
 const emptyCreateForm = {
+  project_name: "",
+  business_unit: "",
+  request_owner: "",
+  team_name: "",
   name: "",
   image_id: "",
   flavor_id: "",
@@ -1530,6 +1534,31 @@ function CreateVmForm({
         <div className="alert warning">Not authorized: viewers cannot create VM requests.</div>
       )}
       <form className="form-grid" onSubmit={submit}>
+        <section className="business-info-section">
+          <h3>Business Information</h3>
+          <div className="business-info-grid">
+            <label>
+              Project Name
+              <input name="project_name" onChange={updateField} required value={form.project_name} />
+            </label>
+            <label>
+              Cost Center
+              <input name="cost_center" onChange={updateField} required value={form.cost_center} />
+            </label>
+            <label>
+              Business Unit
+              <input name="business_unit" onChange={updateField} value={form.business_unit} />
+            </label>
+            <label>
+              Request Owner
+              <input name="request_owner" onChange={updateField} required value={form.request_owner} />
+            </label>
+            <label>
+              Team Name
+              <input name="team_name" onChange={updateField} value={form.team_name} />
+            </label>
+          </div>
+        </section>
         <label>
           Name
           <input name="name" onChange={updateField} required value={form.name} />
@@ -1695,10 +1724,6 @@ function CreateVmForm({
         <label>
           App tag
           <input name="app_tag" onChange={updateField} required value={form.app_tag} />
-        </label>
-        <label>
-          Cost center
-          <input name="cost_center" onChange={updateField} required value={form.cost_center} />
         </label>
         <label>
           Lifetime days
@@ -2223,7 +2248,7 @@ function formatDateTime(value) {
 
 function getRequestUser(request) {
   const payload = request?.request ?? {};
-  return payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
+  return payload.request_owner || payload.requested_by || payload.user || payload.owner || payload.cost_center || "-";
 }
 
 function formatRequestedResources(payload) {
@@ -2437,6 +2462,10 @@ function buildVmRequestPayload(form) {
       .map((item) => item.trim())
       .filter(Boolean),
     public_ip_required: form.public_ip_required,
+    project_name: form.project_name,
+    business_unit: form.business_unit.trim() || null,
+    request_owner: form.request_owner,
+    team_name: form.team_name.trim() || null,
   };
 
   if (form.security_group_id.trim()) {

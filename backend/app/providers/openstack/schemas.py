@@ -165,6 +165,10 @@ class OpenStackVMRequest(BaseModel):
     packages: list[str] = Field(default_factory=list)
     public_ip_required: bool = False
     catalog_service_name: str | None = Field(default=None, min_length=1)
+    project_name: str = Field(..., min_length=1)
+    business_unit: str | None = Field(default=None, min_length=1)
+    request_owner: str = Field(..., min_length=1)
+    team_name: str | None = Field(default=None, min_length=1)
 
 
 class OpenStackRequestPolicyResult(BaseModel):

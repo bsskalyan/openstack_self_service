@@ -43,7 +43,22 @@ class OpenStackRequestStore:
             return []
 
         with self._path.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            records = json.load(file)
+
+        return [self._normalize_record(record) for record in records]
+
+    @staticmethod
+    def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
+        request = dict(record.get("request") or {})
+        request.setdefault(
+            "project_name",
+            request.get("catalog_service_name") or request.get("app_tag") or request.get("name") or "Legacy Request",
+        )
+        request.setdefault("request_owner", record.get("owner") or request.get("cost_center") or "Legacy Owner")
+        request.setdefault("business_unit", None)
+        request.setdefault("team_name", None)
+
+        return {**record, "request": request}
 
     def _write(self, records: list[dict[str, Any]]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
