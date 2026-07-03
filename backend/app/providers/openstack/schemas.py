@@ -176,6 +176,14 @@ class OpenStackRequestPolicyResult(BaseModel):
     reasons: list[str]
 
 
+class OpenStackRequestActivity(BaseModel):
+    action: str
+    status: str
+    message: str
+    created_at: str
+    actor: str = "system"
+
+
 class OpenStackVMRequestRecord(BaseModel):
     id: str
     status: str
@@ -184,6 +192,7 @@ class OpenStackVMRequestRecord(BaseModel):
     server: dict[str, Any] | None = None
     rejection_reason: str | None = None
     provisioning_error: str | None = None
+    activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -195,6 +204,7 @@ class OpenStackVMRequestResponse(BaseModel):
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest
     provisioning_error: str | None = None
+    activity_log: list[OpenStackRequestActivity] = Field(default_factory=list)
     created_at: str
     updated_at: str
 

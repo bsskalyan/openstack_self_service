@@ -780,6 +780,15 @@ td small {
   border-left-color: #dc2626;
 }
 
+.toast div {
+  display: grid;
+  gap: 2px;
+}
+
+.toast strong {
+  color: #172033;
+}
+
 .toast span {
   overflow-wrap: anywhere;
 }
@@ -1011,6 +1020,10 @@ input[readonly] {
   border-top: 4px solid #2563eb;
 }
 
+.server-details-panel {
+  border-top: 4px solid #0891b2;
+}
+
 .request-details-panel.empty-panel {
   align-content: center;
   color: #65738a;
@@ -1044,6 +1057,87 @@ input[readonly] {
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
+}
+
+.timeline-list,
+.activity-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-list li {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+
+.timeline-list li > span {
+  background: #cbd5e1;
+  border-radius: 999px;
+  height: 12px;
+  margin-top: 5px;
+  width: 12px;
+}
+
+.timeline-list li.done > span {
+  background: #16a34a;
+}
+
+.timeline-list li.current > span {
+  background: #d97706;
+}
+
+.timeline-list li.skipped {
+  color: #94a3b8;
+}
+
+.timeline-list strong,
+.activity-list strong {
+  display: block;
+}
+
+.timeline-list small,
+.activity-list small {
+  color: #65738a;
+  display: block;
+  margin-top: 2px;
+}
+
+.score-summary {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.score-summary strong {
+  font-size: 20px;
+}
+
+.cost-breakdown {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: 140px minmax(0, 1fr);
+  margin: 0;
+  padding: 12px;
+}
+
+.activity-list li {
+  border-left: 3px solid #dce3ee;
+  padding-left: 10px;
+}
+
+.activity-list span {
+  color: #43516a;
 }
 
 .approval-actions {

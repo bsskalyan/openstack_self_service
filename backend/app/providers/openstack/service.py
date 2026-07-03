@@ -272,6 +272,14 @@ class OpenStackService:
                 status="approval_required",
                 created_at=now,
                 updated_at=now,
+                activity_log=[
+                    self._activity_entry(
+                        action="submitted",
+                        status="approval_required",
+                        message="Request submitted and routed for approval",
+                        created_at=now,
+                    ),
+                ],
             )
             logger.info(
                 "VM request id='%s' requires approval, score='%s'",
@@ -298,6 +306,20 @@ class OpenStackService:
                 created_at=now,
                 updated_at=self._now(),
                 provisioning_error=str(exc),
+                activity_log=[
+                    self._activity_entry(
+                        action="submitted",
+                        status="auto_approved",
+                        message="Request submitted and auto-approved by policy",
+                        created_at=now,
+                    ),
+                    self._activity_entry(
+                        action="draft_saved",
+                        status="draft",
+                        message=f"Provisioning deferred: {exc}",
+                        created_at=self._now(),
+                    ),
+                ],
             )
             logger.warning(
                 "Saved VM request id='%s' as draft because provisioning failed: %s",
@@ -319,6 +341,20 @@ class OpenStackService:
             created_at=now,
             updated_at=self._now(),
             server=server,
+            activity_log=[
+                self._activity_entry(
+                    action="submitted",
+                    status="auto_approved",
+                    message="Request submitted and auto-approved by policy",
+                    created_at=now,
+                ),
+                self._activity_entry(
+                    action="provisioned",
+                    status=status,
+                    message=f"VM provisioned with server id '{server.get('id')}'",
+                    created_at=self._now(),
+                ),
+            ],
         )
         logger.info("Auto-provisioned VM request id='%s', status='%s'", request_id, status)
         return self._request_store.save_request(record)
@@ -358,6 +394,12 @@ class OpenStackService:
                 "status": "approved",
                 "server": server,
                 "updated_at": self._now(),
+                "activity_log": self._append_activity(
+                    record,
+                    action="approved",
+                    status="approved",
+                    message=f"Request approved and VM provisioned with server id '{server.get('id')}'",
+                ),
             },
         )
         logger.info("Approved and provisioned VM request id='%s'", request_id)
@@ -380,6 +422,15 @@ class OpenStackService:
                 "status": "rejected",
                 "rejection_reason": request.reason if request else None,
                 "updated_at": self._now(),
+                "activity_log": self._append_activity(
+                    record,
+                    action="rejected",
+                    status="rejected",
+                    message=request.reason
+                    if request and request.reason
+                    else "Request rejected without a reason",
+                    actor="admin",
+                ),
             },
         )
         logger.info("Rejected VM request id='%s'", request_id)
@@ -580,6 +631,7 @@ class OpenStackService:
         updated_at: str,
         server: dict[str, Any] | None = None,
         provisioning_error: str | None = None,
+        activity_log: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "id": request_id,
@@ -589,8 +641,46 @@ class OpenStackService:
             "server": server,
             "rejection_reason": None,
             "provisioning_error": provisioning_error,
+            "activity_log": activity_log or [],
             "created_at": created_at,
             "updated_at": updated_at,
+        }
+
+    def _append_activity(
+        self,
+        record: dict[str, Any],
+        *,
+        action: str,
+        status: str,
+        message: str,
+        actor: str = "admin",
+    ) -> list[dict[str, Any]]:
+        return [
+            *record.get("activity_log", []),
+            self._activity_entry(
+                action=action,
+                status=status,
+                message=message,
+                created_at=self._now(),
+                actor=actor,
+            ),
+        ]
+
+    @staticmethod
+    def _activity_entry(
+        *,
+        action: str,
+        status: str,
+        message: str,
+        created_at: str,
+        actor: str = "system",
+    ) -> dict[str, Any]:
+        return {
+            "action": action,
+            "status": status,
+            "message": message,
+            "created_at": created_at,
+            "actor": actor,
         }
 
     @staticmethod

@@ -713,6 +713,7 @@ function AdminRequestDetailsPanel({
 
   const policy = request.policy ?? {};
   const payload = request.request ?? {};
+  const cost = getCostBreakdown(payload, policy);
   const canAct = request.status === "approval_required";
 
   return (
@@ -738,24 +739,13 @@ function AdminRequestDetailsPanel({
         <Detail label="Resources" value={formatRequestedResources(payload)} />
       </dl>
 
-      <section className="details-section">
-        <h4>Governance Explanation</h4>
-        {policy.reasons?.length > 0 ? (
-          <ul className="governance-reasons">
-            {policy.reasons.map((reason) => (
-              <li className="warning" key={reason}>
-                <span>!</span>
-                {reason}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="dashboard-copy">No policy concerns detected.</p>
-        )}
-      </section>
+      <LifecycleTimeline request={request} />
+      <GovernanceExplanation policy={policy} request={payload} />
+      <CostBreakdown cost={cost} />
 
       <JsonBlock title="Full Request" value={payload} />
       <JsonBlock title="Policy Evaluation" value={policy} />
+      <ActivityLog entries={request.activity_log} />
 
       {canAct && (
         <section className="approval-actions">
@@ -819,6 +809,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
 
   const policy = request.policy ?? {};
   const payload = request.request ?? {};
+  const cost = getCostBreakdown(payload, policy);
 
   return (
     <aside className="request-details-panel">
@@ -844,22 +835,14 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Created" value={formatDateTime(request.created_at)} />
       </dl>
 
-      <section className="details-section">
-        <h4>Governance Score Breakdown</h4>
-        {policy.reasons?.length > 0 ? (
-          <ul className="governance-reasons">
-            {policy.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="dashboard-copy">No policy concerns detected.</p>
-        )}
-      </section>
+      <LifecycleTimeline request={request} />
+      <GovernanceExplanation policy={policy} request={payload} />
+      <CostBreakdown cost={cost} />
 
       <JsonBlock title="Full Request Payload" value={payload} />
       <JsonBlock title="Policy Evaluation" value={policy} />
       <JsonBlock title="Created VM / Server" value={request.server} />
+      <ActivityLog entries={request.activity_log} />
 
       {request.provisioning_error && (
         <p className="request-result-note">{request.provisioning_error}</p>
@@ -873,6 +856,88 @@ function JsonBlock({ title, value }) {
     <section className="details-section">
       <h4>{title}</h4>
       <pre>{JSON.stringify(value ?? null, null, 2)}</pre>
+    </section>
+  );
+}
+
+function LifecycleTimeline({ request }) {
+  const steps = buildRequestTimeline(request);
+
+  return (
+    <section className="details-section">
+      <h4>Request Lifecycle</h4>
+      <ol className="timeline-list">
+        {steps.map((step) => (
+          <li className={step.state} key={step.label}>
+            <span />
+            <div>
+              <strong>{step.label}</strong>
+              <small>{step.time ? formatDateTime(step.time) : step.helper}</small>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function GovernanceExplanation({ policy, request }) {
+  const reasons = buildGovernanceReasons(policy, request);
+
+  return (
+    <section className="details-section">
+      <h4>Governance Score Explanation</h4>
+      <div className="score-summary">
+        <strong>{policy.governance_score ?? 0} / 100</strong>
+        <span>{formatDecision(policy.final_decision)}</span>
+      </div>
+      <ul className="governance-reasons">
+        {reasons.map((reason) => (
+          <li className={reason.tone} key={reason.label}>
+            <span>{reason.tone === "positive" ? "OK" : "!"}</span>
+            {reason.label}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CostBreakdown({ cost }) {
+  return (
+    <section className="details-section">
+      <h4>Cost Breakdown</h4>
+      <dl className="cost-breakdown">
+        <Detail label="CPU" value={formatCurrency(cost.cpu)} />
+        <Detail label="RAM" value={formatCurrency(cost.ram)} />
+        <Detail label="Disk" value={formatCurrency(cost.disk)} />
+        <Detail label="Estimated total" value={formatCurrency(cost.total)} />
+      </dl>
+    </section>
+  );
+}
+
+function ActivityLog({ entries }) {
+  const activity = entries?.length ? entries : [];
+
+  return (
+    <section className="details-section">
+      <h4>Activity / Audit Log</h4>
+      {activity.length > 0 ? (
+        <ol className="activity-list">
+          {activity.map((entry, index) => (
+            <li key={`${entry.action}-${entry.created_at}-${index}`}>
+              <strong>{formatDecision(entry.action)}</strong>
+              <span>{entry.message}</span>
+              <small>
+                {entry.actor || "system"} - {formatDateTime(entry.created_at)}
+              </small>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="dashboard-copy">No audit activity recorded yet.</p>
+      )}
     </section>
   );
 }
@@ -951,6 +1016,7 @@ function Dashboard({ data, loading, providerReachable, selectedProvider }) {
 function ServersList({ loading, providerReachable, selectedProvider, servers, onAction }) {
   const [pendingServer, setPendingServer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [selectedServer, setSelectedServer] = useState(null);
 
   async function runServerAction(actionKey, label, server, action) {
     setPendingServer(`${server.id}:${actionKey}`);
@@ -978,47 +1044,48 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
         </div>
       </div>
 
-      <div className="server-table-card">
-        {loading && (
-          <div className="table-loading">
-            <span className="spinner" />
-            <span>Loading servers...</span>
-          </div>
-        )}
+      <div className="requests-layout">
+        <div className="server-table-card">
+          {loading && (
+            <div className="table-loading">
+              <span className="spinner" />
+              <span>Loading servers...</span>
+            </div>
+          )}
 
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Image</th>
-              <th>Flavor</th>
-              <th>Private IP</th>
-              <th>Floating IP</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!loading &&
-              servers.map((server) => {
-                const ips = getServerIps(server.addresses);
-                return (
-                  <tr key={server.id}>
-                    <td>
-                      <strong>{server.name}</strong>
-                      <small>{server.id}</small>
-                    </td>
-                    <td>
-                      <span className={`server-status ${normalizeStatus(server.status)}`}>
-                        {server.status ?? "unknown"}
-                      </span>
-                    </td>
-                    <td>{server.image_id ?? "-"}</td>
-                    <td>{server.flavor_id ?? "-"}</td>
-                    <td>{ips.privateIp ?? "-"}</td>
-                    <td>{ips.floatingIp ?? "-"}</td>
-                    <td>
-                      <div className="button-row server-actions">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Image</th>
+                <th>Flavor</th>
+                <th>Private IP</th>
+                <th>Floating IP</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading &&
+                servers.map((server) => {
+                  const ips = getServerIps(server.addresses);
+                  return (
+                    <tr className="clickable-row" key={server.id} onClick={() => setSelectedServer(server)}>
+                      <td>
+                        <strong>{server.name}</strong>
+                        <small>{server.id}</small>
+                      </td>
+                      <td>
+                        <span className={`server-status ${normalizeStatus(server.status)}`}>
+                          {server.status ?? "unknown"}
+                        </span>
+                      </td>
+                      <td>{server.image_id ?? "-"}</td>
+                      <td>{server.flavor_id ?? "-"}</td>
+                      <td>{ips.privateIp ?? "-"}</td>
+                      <td>{ips.floatingIp ?? "-"}</td>
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <div className="button-row server-actions">
                         <ActionButton
                           busy={pendingServer === `${server.id}:start`}
                           disabled={!providerReachable}
@@ -1067,23 +1134,29 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
                         >
                           Delete
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            {!loading && servers.length === 0 && (
-              <tr>
-                <td className="empty-state-cell" colSpan={7}>
-                  <div className="empty-state">
-                    <strong>No servers found</strong>
-                    <span>Create a VM to see it listed here.</span>
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              {!loading && servers.length === 0 && (
+                <tr>
+                  <td className="empty-state-cell" colSpan={7}>
+                    <div className="empty-state">
+                      <strong>No servers found</strong>
+                      <span>Create a VM to see it listed here.</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <ServerDetailsPanel
+          server={selectedServer}
+          onClose={() => setSelectedServer(null)}
+        />
       </div>
 
       {confirmDelete && (
@@ -1100,6 +1173,50 @@ function ServersList({ loading, providerReachable, selectedProvider, servers, on
         />
       )}
     </section>
+  );
+}
+
+function ServerDetailsPanel({ onClose, server }) {
+  if (!server) {
+    return (
+      <aside className="request-details-panel empty-panel">
+        <p className="eyebrow">Server</p>
+        <h3>Select a server</h3>
+        <p className="dashboard-copy">Click a server row to inspect its OpenStack details.</p>
+      </aside>
+    );
+  }
+
+  const ips = getServerIps(server.addresses);
+
+  return (
+    <aside className="request-details-panel server-details-panel">
+      <div className="request-details-header">
+        <div>
+          <p className="eyebrow">Server</p>
+          <h3>{server.name || shortId(server.id)}</h3>
+        </div>
+        <button onClick={onClose} type="button">
+          Close
+        </button>
+      </div>
+
+      <dl className="request-result-details">
+        <Detail label="Server ID" value={server.id} />
+        <Detail label="Status" value={server.status} />
+        <Detail label="VM state" value={server.vm_state} />
+        <Detail label="Image" value={server.image_id} />
+        <Detail label="Flavor" value={server.flavor_id} />
+        <Detail label="Private IP" value={ips.privateIp} />
+        <Detail label="Floating IP" value={ips.floatingIp} />
+        <Detail label="Project" value={server.project_id} />
+        <Detail label="Created" value={formatDateTime(server.created_at)} />
+        <Detail label="Updated" value={formatDateTime(server.updated_at)} />
+      </dl>
+
+      <JsonBlock title="Addresses" value={server.addresses} />
+      <JsonBlock title="Raw Server Data" value={server} />
+    </aside>
   );
 }
 
@@ -1690,7 +1807,10 @@ function ToastStack({ onDismiss, toasts }) {
     <div className="toast-stack" aria-live="polite">
       {toasts.map((toast) => (
         <div className={`toast ${toast.type}`} key={toast.id}>
-          <span>{toast.message}</span>
+          <div>
+            <strong>{toast.type === "error" ? "Action failed" : "Action completed"}</strong>
+            <span>{toast.message}</span>
+          </div>
           <button onClick={() => onDismiss(toast.id)} type="button">
             Dismiss
           </button>
@@ -1792,6 +1912,84 @@ function formatRequestedResources(payload) {
   }
 
   return `${payload.cpu ?? "-"} vCPU / ${payload.ram_gb ?? "-"} GB RAM / ${payload.disk_gb ?? "-"} GB disk`;
+}
+
+function getCostBreakdown(request, policy = {}) {
+  const cpu = Number(request?.cpu || 0) * 500;
+  const ram = Number(request?.ram_gb || 0) * 150;
+  const disk = Number(request?.disk_gb || 0) * 5;
+  const calculatedTotal = cpu + ram + disk;
+  const total = Number.isFinite(Number(policy.estimated_monthly_cost))
+    ? Number(policy.estimated_monthly_cost)
+    : calculatedTotal;
+
+  return { cpu, ram, disk, total };
+}
+
+function buildGovernanceReasons(policy = {}, request = {}) {
+  if (policy.reasons?.length > 0) {
+    return policy.reasons.map((reason) => ({ label: reason, tone: "warning" }));
+  }
+
+  return [
+    { label: "Cost within allowed budget", tone: "positive" },
+    { label: "Compute within auto-approval limits", tone: "positive" },
+    {
+      label: request.public_ip_required ? "Public IP requested" : "Internal network only",
+      tone: request.public_ip_required ? "warning" : "positive",
+    },
+    {
+      label: request.catalog_service_name ? "Approved service template" : "Standard request",
+      tone: "positive",
+    },
+  ];
+}
+
+function buildRequestTimeline(request) {
+  const activity = request?.activity_log ?? [];
+  const hasAction = (action) => activity.some((entry) => entry.action === action);
+  const actionTime = (action) => activity.find((entry) => entry.action === action)?.created_at;
+  const terminalTime = request?.updated_at !== request?.created_at ? request?.updated_at : null;
+
+  return [
+    {
+      label: "Submitted",
+      state: "done",
+      time: request?.created_at,
+      helper: "Request created",
+    },
+    {
+      label: "Policy Evaluated",
+      state: "done",
+      time: request?.created_at,
+      helper: "Governance score calculated",
+    },
+    {
+      label: request?.status === "approval_required" ? "Awaiting Approval" : "Approval Decision",
+      state:
+        request?.status === "approval_required"
+          ? "current"
+          : ["approved", "rejected"].includes(request?.status)
+            ? "done"
+            : "skipped",
+      time: ["approved", "rejected"].includes(request?.status) ? terminalTime : null,
+      helper:
+        request?.status === "approval_required"
+          ? "Admin review required"
+          : formatDecision(request?.status),
+    },
+    {
+      label: "Provisioning",
+      state:
+        request?.server || hasAction("provisioned") || hasAction("approved")
+          ? "done"
+          : request?.status === "draft"
+            ? "current"
+            : "skipped",
+      time: actionTime("provisioned") || actionTime("approved") || terminalTime,
+      helper: request?.status === "draft" ? "Waiting for provider availability" : "VM creation",
+    },
+  ];
 }
 
 function buildCreateFormInitialValues(
