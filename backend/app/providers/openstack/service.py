@@ -298,7 +298,9 @@ class OpenStackService:
             status="submitted",
             message=(
                 f"Request '{request.application_name or request.name}' submitted "
-                f"for {request.environment} with {self._format_lifetime(request)} lifetime "
+                f"for project '{request.project_name}', cost center '{request.cost_center}', "
+                f"owner '{request.request_owner}', application type '{request.application_type or 'N/A'}', "
+                f"environment '{request.environment}', {self._format_lifetime(request)} lifetime "
                 f"and packages: {self._format_packages(request)}"
             ),
         )
@@ -312,7 +314,8 @@ class OpenStackService:
             status=policy_result.final_decision,
             message=(
                 f"Policy evaluated with governance score {policy_result.governance_score} "
-                f"for {request.environment} / {self._format_lifetime(request)} / "
+                f"for project '{request.project_name}' / application '{request.application_name}' / "
+                f"{request.environment} / {self._format_lifetime(request)} / "
                 f"packages: {self._format_packages(request)}"
             ),
         )

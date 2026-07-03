@@ -1,0 +1,62 @@
+[
+  {
+    "id": "c2a9e352-dfa1-4a80-a925-27392a9fd493",
+    "timestamp": "2026-07-03T05:57:38.819571+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "request_submitted",
+    "resource_type": "request",
+    "resource_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "submitted",
+    "message": "Request 'Ubunutest' submitted for project 'Test ', cost center 'jk9u', owner '7ek2', application type 'Web', environment 'Development', 30 Days lifetime and packages: None"
+  },
+  {
+    "id": "e32f7149-c85f-4ab2-b839-cfeef30b0bdb",
+    "timestamp": "2026-07-03T05:57:38.835050+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "policy_evaluated",
+    "resource_type": "request",
+    "resource_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "auto_approved",
+    "message": "Policy evaluated with governance score 0 for project 'Test ' / application 'Ubunutest' / Development / 30 Days / packages: None"
+  },
+  {
+    "id": "07707882-a02f-4bb7-a837-a2a250dd4aa7",
+    "timestamp": "2026-07-03T05:57:38.859957+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "auto_approved",
+    "resource_type": "request",
+    "resource_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "auto_approved",
+    "message": "Request auto-approved by policy"
+  },
+  {
+    "id": "485e35f6-5510-4422-8619-41371d4e2b1c",
+    "timestamp": "2026-07-03T05:57:38.875165+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "provisioning_started",
+    "resource_type": "server",
+    "resource_id": null,
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "started",
+    "message": "VM provisioning started"
+  },
+  {
+    "id": "cfe5fbb6-ea2b-4834-a0c4-04271fcc126f",
+    "timestamp": "2026-07-03T05:57:39.992278+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "provisioning_succeeded",
+    "resource_type": "server",
+    "resource_id": "78bef1c8-0154-4e07-8bf9-0971606daa99",
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "succeeded",
+    "message": "VM provisioned with server id '78bef1c8-0154-4e07-8bf9-0971606daa99'"
+  }
+]

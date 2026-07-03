@@ -1017,6 +1017,17 @@ label {
   gap: 6px;
 }
 
+label:has(input[required])::after,
+label:has(select[required])::after,
+label:has(textarea[required])::after {
+  color: #9a3412;
+  content: "Required";
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .checkbox-label {
   align-items: center;
   display: flex;
@@ -1057,6 +1068,13 @@ textarea {
 textarea {
   min-height: 104px;
   resize: vertical;
+}
+
+input:invalid,
+select:invalid,
+textarea:invalid {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.14);
 }
 
 input[readonly] {

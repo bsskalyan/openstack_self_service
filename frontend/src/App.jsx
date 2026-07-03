@@ -652,7 +652,9 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
             <thead>
               <tr>
                 <th>Request ID</th>
-                <th>Catalog Item</th>
+                <th>Project</th>
+                <th>Cost Center</th>
+                <th>Application</th>
                 <th>Status</th>
                 <th>Governance Score</th>
                 <th>Approval Decision</th>
@@ -676,7 +678,9 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                       <strong>{shortId(request.id)}</strong>
                       <small>{request.id}</small>
                     </td>
-                    <td>{getRequestServiceName(request)}</td>
+                    <td>{request.request?.project_name || "-"}</td>
+                    <td>{request.request?.cost_center || "-"}</td>
+                    <td>{getRequestApplicationName(request)}</td>
                     <td>
                       <span className={`request-status ${normalizeStatus(request.status)}`}>
                         {formatDecision(request.status)}
@@ -694,7 +698,7 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                 ))}
               {!loading && requests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={11}>
+                  <td className="empty-state-cell" colSpan={13}>
                     <div className="empty-state">
                       <strong>No requests found</strong>
                       <span>Submit a catalog request to see it here.</span>
@@ -815,9 +819,12 @@ function AdminApprovalDashboard({
               <tr>
                 <th>Request ID</th>
                 <th>User</th>
-                <th>Service</th>
+                <th>Project</th>
+                <th>Cost Center</th>
+                <th>Application</th>
                 <th>Cost</th>
                 <th>Governance Score</th>
+                <th>Approval Decision</th>
                 <th>Environment</th>
                 <th>Lifetime</th>
                 <th>Packages</th>
@@ -838,9 +845,12 @@ function AdminApprovalDashboard({
                       <small>{request.id}</small>
                     </td>
                     <td>{getRequestUser(request)}</td>
-                    <td>{getRequestServiceName(request)}</td>
+                    <td>{request.request?.project_name || "-"}</td>
+                    <td>{request.request?.cost_center || "-"}</td>
+                    <td>{getRequestApplicationName(request)}</td>
                     <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
                     <td>{request.policy?.governance_score ?? "-"}</td>
+                    <td>{formatDecision(request.policy?.final_decision)}</td>
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
                     <td>{formatPackages(request.request?.packages)}</td>
@@ -854,7 +864,7 @@ function AdminApprovalDashboard({
                 ))}
               {!loading && pendingRequests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={10}>
+                  <td className="empty-state-cell" colSpan={13}>
                     <div className="empty-state">
                       <strong>No pending approvals</strong>
                       <span>Auto-approved, rejected, and provisioned requests do not appear here.</span>
@@ -932,6 +942,8 @@ function AdminRequestDetailsPanel({
         <Detail label="Request ID" value={request.id} />
         <Detail label="User" value={getRequestUser(request)} />
         <Detail label="Status" value={formatDecision(request.status)} />
+        <Detail label="Project" value={payload.project_name} />
+        <Detail label="Cost Center" value={payload.cost_center} />
         <Detail label="Service" value={payload.catalog_service_name || payload.application_name || payload.app_tag} />
         <Detail label="Application Name" value={payload.application_name} />
         <Detail label="Application Type" value={payload.application_type} />
@@ -1037,6 +1049,8 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Request ID" value={request.id} />
         <Detail label="Status" value={formatDecision(request.status)} />
         <Detail label="Selected service" value={payload.catalog_service_name} />
+        <Detail label="Project" value={payload.project_name} />
+        <Detail label="Cost Center" value={payload.cost_center} />
         <Detail label="Application Name" value={payload.application_name} />
         <Detail label="Application Type" value={payload.application_type} />
         <Detail label="Purpose" value={payload.purpose_description} />
@@ -2037,9 +2051,11 @@ function ReviewSubmitSummary({
           <Detail label="Business Unit" value={form.business_unit} />
           <Detail label="Request Owner" value={form.request_owner} />
           <Detail label="Team Name" value={form.team_name} />
+          <Detail label="Provider" value="OpenStack" />
         </ReviewGroup>
 
         <ReviewGroup title="Application Information">
+          <Detail label="Selected service" value={form.catalog_service_name} />
           <Detail label="Application Name" value={form.application_name} />
           <Detail label="Application Type" value={form.application_type} />
           <Detail label="Purpose" value={form.purpose_description} />
@@ -2081,6 +2097,8 @@ function ReviewSubmitSummary({
 
         <ReviewGroup title="Estimated Cost">
           <Detail label="Monthly estimate" value={`${formatCurrency(governance.estimatedMonthlyCost)} / month`} />
+          <Detail label="Catalog estimate" value={form.estimated_monthly_cost ? `${formatCurrency(form.estimated_monthly_cost)} / month` : ""} />
+          <Detail label="Catalog risk level" value={form.risk_level} />
         </ReviewGroup>
       </div>
     </section>
@@ -2490,6 +2508,11 @@ function getRequestServiceName(request) {
   return payload.catalog_service_name || payload.application_name || payload.app_tag || "-";
 }
 
+function getRequestApplicationName(request) {
+  const payload = request?.request ?? {};
+  return payload.application_name || payload.app_tag || payload.catalog_service_name || "-";
+}
+
 function normalizeEnvironmentValue(value) {
   const normalized = String(value || "").toLowerCase();
   const aliases = {
@@ -2562,20 +2585,20 @@ function formatPackages(packages) {
 
 function getMissingRequiredFields(form) {
   const requiredFields = [
-    ["Project Name", form.project_name],
-    ["Cost Center", form.cost_center],
-    ["Request Owner", form.request_owner],
-    ["Application Name", form.application_name],
-    ["VM Name", form.name],
-    ["Image", form.image_id],
-    ["Flavor", form.flavor_id],
-    ["Network", form.network_id],
-    ["CPU", form.cpu],
-    ["RAM", form.ram_gb],
-    ["Disk", form.disk_gb],
-    ["App tag", form.app_tag],
-    ["Environment", form.environment],
-    ["Lifetime", form.lifetime],
+    ["Enter Project Name", form.project_name],
+    ["Enter Cost Center", form.cost_center],
+    ["Enter Request Owner", form.request_owner],
+    ["Enter Application Name", form.application_name],
+    ["Enter VM Name", form.name],
+    ["Select an Image", form.image_id],
+    ["Select a Flavor", form.flavor_id],
+    ["Select a Network", form.network_id],
+    ["Enter CPU count", form.cpu],
+    ["Enter RAM in GB", form.ram_gb],
+    ["Enter Disk size in GB", form.disk_gb],
+    ["Enter App tag", form.app_tag],
+    ["Select Environment", form.environment],
+    ["Select Lifetime", form.lifetime],
   ];
 
   const missing = requiredFields
