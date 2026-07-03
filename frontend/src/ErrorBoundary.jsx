@@ -19,7 +19,8 @@ export class ErrorBoundary extends Component {
     if (this.state.error) {
       return (
         <main className="boot-error">
-          <h1>OpenStack Portal</h1>
+          <h1>Colruyt Megha Setu (CMS)</h1>
+          <p>Enterprise AI-Driven Self-Service Private Cloud Platform</p>
           <p>The frontend failed to render.</p>
           <pre>{this.state.error.message}</pre>
         </main>

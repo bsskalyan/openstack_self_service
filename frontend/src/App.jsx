@@ -241,10 +241,10 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">OS</span>
+          <span className="brand-mark">CMS</span>
           <div>
-            <h1>OpenStack Portal</h1>
-            <p>Self-service cloud operations</p>
+            <h1>Colruyt Megha Setu (CMS)</h1>
+            <p>Enterprise AI-Driven Self-Service Private Cloud Platform</p>
           </div>
         </div>
 
@@ -267,8 +267,11 @@ export default function App() {
       <main className="content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">API</p>
-            <strong>http://127.0.0.1:8000/api/v1</strong>
+            <p className="eyebrow">Private Cloud Platform</p>
+            <strong>Colruyt Megha Setu (CMS)</strong>
+            <span className="topbar-subtitle">
+              Enterprise AI-Driven Self-Service Private Cloud Platform
+            </span>
           </div>
           <div className="topbar-actions">
             <ProviderSelector
@@ -383,6 +386,11 @@ export default function App() {
             onAction={runAction}
           />
         )}
+
+        <footer className="portal-footer">
+          <strong>Colruyt Megha Setu (CMS)</strong>
+          <span>Enterprise AI-Driven Self-Service Private Cloud Platform</span>
+        </footer>
       </main>
 
       <ToastStack
@@ -1198,9 +1206,9 @@ function Dashboard({ data, loading, providerReachable, selectedProvider }) {
       <div className="dashboard-hero">
         <div>
           <p className="eyebrow">Overview</p>
-          <h2>Cloud Dashboard</h2>
+          <h2>Colruyt Megha Setu (CMS) Dashboard</h2>
           <p className="dashboard-copy">
-            Live OpenStack resource counts from the self-service API.
+            Enterprise AI-driven private cloud insights and resource counts.
           </p>
         </div>
         <div className="hero-actions">
