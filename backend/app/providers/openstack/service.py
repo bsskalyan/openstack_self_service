@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import openstack
 from openstack.connection import Connection
@@ -32,6 +32,10 @@ class OpenStackServiceError(Exception):
 
 class OpenStackConfigurationError(OpenStackServiceError):
     """Raised when required OpenStack configuration is missing."""
+
+
+class OpenStackValidationError(OpenStackServiceError):
+    """Raised when request data is invalid before calling OpenStack."""
 
 
 class OpenStackRequestNotFoundError(OpenStackServiceError):
@@ -117,6 +121,7 @@ class OpenStackService:
                 {
                     "id": network.id,
                     "name": network.name,
+                    "label": self._format_network_label(network),
                     "status": getattr(network, "status", None),
                     "admin_state_up": getattr(network, "admin_state_up", None),
                     "is_shared": getattr(network, "is_shared", None),
@@ -234,10 +239,11 @@ class OpenStackService:
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         try:
+            self._validate_network_id(network_id)
             connection = self.get_connection()
             image = connection.image.find_image(image_id, ignore_missing=False)
             flavor = connection.compute.find_flavor(flavor_id, ignore_missing=False)
-            network = connection.network.find_network(network_id, ignore_missing=False)
+            network = self._resolve_network_by_id(connection, network_id)
 
             server_payload: dict[str, Any] = {
                 "name": name,
@@ -278,6 +284,25 @@ class OpenStackService:
                 failure_details=failure_details,
             ) from exc
 
+    def _resolve_network_by_id(self, connection: Connection, network_id: str) -> Any:
+        matching_networks = [
+            network
+            for network in connection.network.networks()
+            if getattr(network, "id", None) == network_id
+        ]
+
+        if len(matching_networks) == 1:
+            return matching_networks[0]
+
+        if not matching_networks:
+            raise OpenStackValidationError(
+                f"Selected network id '{network_id}' is unavailable. Select a network by id from the networks endpoint.",
+            )
+
+        raise OpenStackValidationError(
+            f"Selected network id '{network_id}' is ambiguous. Ask an administrator to verify OpenStack network IDs.",
+        )
+
     def submit_vm_request(
         self,
         request: OpenStackVMRequest,
@@ -285,6 +310,7 @@ class OpenStackService:
         owner: str | None = None,
         owner_role: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_network_id(request.network_id)
         policy_result = evaluate_vm_request(request)
         request_id = str(uuid4())
         now = self._now()
@@ -1044,6 +1070,29 @@ class OpenStackService:
     @staticmethod
     def _format_packages(request: OpenStackVMRequest) -> str:
         return ", ".join(request.packages) if request.packages else "None"
+
+    @staticmethod
+    def _validate_network_id(network_id: str) -> None:
+        if not network_id or not network_id.strip():
+            raise OpenStackValidationError("Network ID is required. Select a network by id.")
+
+        if network_id.startswith("auto:"):
+            raise OpenStackValidationError(
+                "Network ID is required before provisioning. The automatic network placeholder cannot be used.",
+            )
+
+        try:
+            UUID(network_id)
+        except ValueError as exc:
+            raise OpenStackValidationError(
+                f"Invalid network_id '{network_id}'. Select a network by id, not by name.",
+            ) from exc
+
+    @staticmethod
+    def _format_network_label(network: Any) -> str:
+        name = getattr(network, "name", None)
+        network_id = getattr(network, "id", None)
+        return f"{name} ({network_id})" if name else str(network_id)
 
     @staticmethod
     def _extract_resource_id(resource: Any) -> str | None:

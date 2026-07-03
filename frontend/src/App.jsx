@@ -220,6 +220,7 @@ export default function App() {
   const [selectedProviderId, setSelectedProviderId] = useState("openstack");
   const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
   const [currentUser, setCurrentUser] = useState(mockUsers[0]);
+  const [theme, setTheme] = useState(() => window.localStorage.getItem("cms-theme") || "light");
   const { data, loading, error, providerReachable, setError, refresh } =
     useOpenStackData(currentUser);
   const activeTabAllowed = canAccessTab(activeTab, currentUser.role);
@@ -248,6 +249,10 @@ export default function App() {
     );
   }, [setError]);
 
+  useEffect(() => {
+    window.localStorage.setItem("cms-theme", theme);
+  }, [theme]);
+
   function showToast(message, type = "success") {
     const id = window.crypto?.randomUUID?.() ?? String(Date.now());
     setToasts((current) => [...current, { id, message, type }]);
@@ -274,7 +279,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${theme === "dark" ? "theme-dark" : "theme-light"}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">OS</span>
@@ -304,7 +309,7 @@ export default function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">API</p>
-            <strong>http://127.0.0.1:8000/api/v1</strong>
+            <strong>http://10.161.230.18:8000/api/v1</strong>
           </div>
           <div className="topbar-actions">
             <ProviderSelector
@@ -313,6 +318,13 @@ export default function App() {
               onChange={setSelectedProviderId}
             />
             <UserSelector currentUser={currentUser} onChange={setCurrentUser} />
+            <button
+              className="theme-toggle"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              type="button"
+            >
+              {theme === "dark" ? "Bright screen" : "Dark screen"}
+            </button>
             <button className="primary" disabled={loading} onClick={refresh} type="button">
               {loading ? "Refreshing..." : "Refresh"}
             </button>
@@ -1772,7 +1784,7 @@ function CreateVmForm({
             )}
             {networks.map((network) => (
               <option key={network.id} value={network.id}>
-                {network.name || network.id}
+                {network.label || formatNetworkLabel(network)}
               </option>
             ))}
           </select>
@@ -2641,7 +2653,15 @@ function findResourceLabel(resources, value, idField = "id") {
   }
 
   const resource = resources.find((item) => item[idField] === value || item.id === value || item.name === value);
+  if (resource?.id && Object.hasOwn(resource, "is_router_external")) {
+    return resource.label || formatNetworkLabel(resource);
+  }
+
   return resource?.name || resource?.id || value;
+}
+
+function formatNetworkLabel(network) {
+  return network?.name ? `${network.name} (${network.id})` : network?.id || "-";
 }
 
 function formatReviewDecision(decision) {
@@ -2749,7 +2769,7 @@ function buildCreateFormInitialValues(
       ...nextValues,
       image_id: "auto:image",
       flavor_id: "auto:flavor",
-      network_id: "auto:network",
+      network_id: "",
       key_name: "auto:keypair",
       security_group_id: "auto:security-group",
     };
@@ -2804,9 +2824,17 @@ function selectDefaultFlavor(flavors, form) {
 
 function selectDefaultNetwork(networks) {
   return (
-    networks.find((network) => !network.is_router_external && normalizeStatus(network.status) === "active") ??
-    networks.find((network) => !network.is_router_external) ??
-    networks.find((network) => network.id) ??
+    networks.find(
+      (network) =>
+        String(network.name || "").toLowerCase() === "private" &&
+        !network.is_router_external &&
+        normalizeStatus(network.status) === "active",
+    ) ??
+    networks.find(
+      (network) =>
+        String(network.name || "").toLowerCase() === "private" &&
+        !network.is_router_external,
+    ) ??
     null
   );
 }

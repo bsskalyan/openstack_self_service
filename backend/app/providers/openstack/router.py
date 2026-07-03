@@ -39,6 +39,7 @@ from app.providers.openstack.service import (
     OpenStackRequestNotFoundError,
     OpenStackService,
     OpenStackServiceError,
+    OpenStackValidationError,
 )
 
 
@@ -75,6 +76,13 @@ def handle_openstack_error(operation: str, exc: OpenStackServiceError) -> HTTPEx
         logger.warning("%s failed due to OpenStack configuration: %s", operation, exc)
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+
+    if isinstance(exc, OpenStackValidationError):
+        logger.warning("%s failed due to invalid request data: %s", operation, exc)
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=detail,
         )
 

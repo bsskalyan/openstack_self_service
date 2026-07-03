@@ -44,6 +44,7 @@ class OpenStackFlavorResponse(BaseModel):
 class OpenStackNetworkResponse(BaseModel):
     id: str
     name: str | None
+    label: str
     status: str | None
     admin_state_up: bool | None
     is_shared: bool | None
