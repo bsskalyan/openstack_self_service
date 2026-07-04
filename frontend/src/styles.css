@@ -915,7 +915,7 @@ dd {
 }
 
 .server-table-card table {
-  min-width: 1120px;
+  min-width: 1040px;
 }
 
 .requests-table table {
@@ -1024,23 +1024,28 @@ dd {
 }
 
 .server-actions {
-  min-width: 730px;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 470px;
+  min-width: 0;
 }
 
 .action-button {
   align-items: center;
   border-radius: 7px;
   display: inline-flex;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
-  gap: 7px;
-  min-height: 34px;
-  padding: 7px 10px;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 8px;
   white-space: nowrap;
 }
 
 .action-icon {
   flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
 }
 
 .action-primary {
@@ -1101,7 +1106,7 @@ dd {
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
   display: grid;
   gap: 4px;
-  min-width: 150px;
+  min-width: 128px;
   padding: 6px;
   position: absolute;
   right: 0;

@@ -1633,21 +1633,24 @@ function ServersList({
                             busy={pendingServer === `${server.id}:console`}
                             disabled={!actionsAllowed}
                             icon="console"
-                            label="Web Console"
+                            label="Web"
+                            title="Web Console"
                             variant="primary"
                             onClick={() => openWebConsole(server)}
                           />
                           <ActionButton
                             disabled={!serverAccessAllowed}
                             icon="terminal"
-                            label="CLI Console"
+                            label="CLI"
+                            title="CLI Console"
                             variant="terminal"
                             onClick={() => openCliConsole(server)}
                           />
                           <ActionButton
                             disabled={!providerReachable}
                             icon="snapshot"
-                            label="Snapshots"
+                            label="Snap"
+                            title="Snapshots"
                             variant="neutral"
                             onClick={() => setSnapshotServer(server)}
                           />
@@ -1655,7 +1658,8 @@ function ServersList({
                             busy={pendingServer === `${server.id}:start`}
                             disabled={!actionsAllowed}
                             icon="power"
-                            label="Power On"
+                            label="On"
+                            title="Power On"
                             variant="success"
                             onClick={() =>
                               runServerAction("start", "Power on server", server, () =>
@@ -1667,7 +1671,8 @@ function ServersList({
                             busy={pendingServer === `${server.id}:stop`}
                             disabled={!actionsAllowed}
                             icon="shutdown"
-                            label="Shutdown"
+                            label="Off"
+                            title="Shutdown"
                             variant="warning"
                             onClick={() =>
                               runServerAction("stop", "Shutdown server", server, () =>
@@ -1701,10 +1706,11 @@ function ServersList({
                             className="action-button action-danger"
                             disabled={!actionsAllowed}
                             onClick={() => setConfirmDelete(server)}
+                            title="Delete"
                             type="button"
                           >
                             <ActionIcon name="delete" />
-                            Delete
+                            Del
                           </button>
                         </div>
                       </td>
@@ -2900,12 +2906,21 @@ function MetricCard({ label, value, helper, tone, loading }) {
   );
 }
 
-function ActionButton({ busy, disabled = false, icon, label, onClick, variant = "neutral" }) {
+function ActionButton({
+  busy,
+  disabled = false,
+  icon,
+  label,
+  onClick,
+  title,
+  variant = "neutral",
+}) {
   return (
     <button
       className={`action-button action-${variant}`}
       disabled={busy || disabled}
       onClick={onClick}
+      title={title || label}
       type="button"
     >
       {busy ? <span className="spinner small" /> : null}
@@ -2932,6 +2947,7 @@ function RebootActionButton({
         className="action-button action-info"
         disabled={busy || disabled}
         onClick={onToggle}
+        title="Reboot"
         type="button"
       >
         {busy ? <span className="spinner small" /> : <ActionIcon name="reboot" />}
