@@ -85,8 +85,11 @@ def evaluate_vm_request(request: OpenStackVMRequest) -> OpenStackRequestPolicyRe
         else "approval_required",
         governance_decision=governance_decision,
         final_decision=final_decision,
+        approval_decision=final_decision,
         governance_score=governance_score,
         estimated_monthly_cost=estimated_monthly_cost,
+        estimated_cost=estimated_monthly_cost,
+        risk_level=calculate_risk_level(governance_score),
         reasons=reasons,
     )
 
@@ -98,3 +101,13 @@ def estimate_monthly_cost(request: OpenStackVMRequest) -> float:
 def is_custom_image(image_id: str) -> bool:
     normalized = image_id.lower()
     return normalized.startswith("custom:") or "custom" in normalized
+
+
+def calculate_risk_level(governance_score: int) -> str:
+    if governance_score <= 30:
+        return "low"
+
+    if governance_score <= 60:
+        return "medium"
+
+    return "high"

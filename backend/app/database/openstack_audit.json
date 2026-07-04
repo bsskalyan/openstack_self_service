@@ -58,5 +58,77 @@
     "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
     "status": "succeeded",
     "message": "VM provisioned with server id '78bef1c8-0154-4e07-8bf9-0971606daa99'"
+  },
+  {
+    "id": "c8823f1d-d65e-4243-a317-936ff3cea58f",
+    "timestamp": "2026-07-03T17:05:01.788014+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "request_submitted",
+    "resource_type": "request",
+    "resource_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "submitted",
+    "message": "Request 'test-vm' submitted for project 'test', cost center 'jk9u', owner '7ek2', application type 'Web', environment 'Test', 7 Days lifetime and packages: Docker, Git"
+  },
+  {
+    "id": "e58c1704-75f8-4875-9904-98932fb25908",
+    "timestamp": "2026-07-03T17:05:01.809233+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "policy_evaluated",
+    "resource_type": "request",
+    "resource_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "approval_required",
+    "message": "Policy evaluated with governance score 30 for project 'test' / application 'test-vm' / Test / 7 Days / packages: Docker, Git"
+  },
+  {
+    "id": "b535dee8-f655-4e46-b085-d7ad97facc9c",
+    "timestamp": "2026-07-03T17:05:01.836958+00:00",
+    "actor": "system",
+    "role": "system",
+    "action": "approval_required",
+    "resource_type": "request",
+    "resource_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "approval_required",
+    "message": "Request requires admin approval"
+  },
+  {
+    "id": "8fe1c70a-809b-45e2-a0b3-3b7e8f0467f1",
+    "timestamp": "2026-07-03T17:07:06.461954+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "approved",
+    "resource_type": "request",
+    "resource_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "approved",
+    "message": "Request approved"
+  },
+  {
+    "id": "20f9cd3c-57c3-461e-864a-942aecccccfc",
+    "timestamp": "2026-07-03T17:07:06.477350+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "provisioning_started",
+    "resource_type": "server",
+    "resource_id": null,
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "started",
+    "message": "VM provisioning started after approval"
+  },
+  {
+    "id": "402a73c8-ab00-4fbd-a9fa-b4d4bc9a00c5",
+    "timestamp": "2026-07-03T17:07:07.117984+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "provisioning_succeeded",
+    "resource_type": "server",
+    "resource_id": "fb945c6b-9d98-46f8-82cb-b04537fe2d5a",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "succeeded",
+    "message": "VM provisioned with server id 'fb945c6b-9d98-46f8-82cb-b04537fe2d5a'"
   }
 ]

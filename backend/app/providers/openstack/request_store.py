@@ -62,8 +62,40 @@ class OpenStackRequestStore:
         request.setdefault("purpose_description", None)
         request.setdefault("lifetime", cls._normalize_lifetime(request.get("lifetime_days")))
         request["packages"] = cls._normalize_packages(request.get("packages"))
+        policy = cls._normalize_policy(record.get("policy") or {})
 
-        return {**record, "request": request, "expires_at": record.get("expires_at")}
+        return {
+            **record,
+            "request": request,
+            "policy": policy,
+            "estimated_cost": record.get("estimated_cost", policy["estimated_cost"]),
+            "risk_level": record.get("risk_level", policy["risk_level"]),
+            "governance_score": record.get("governance_score", policy["governance_score"]),
+            "approval_decision": record.get("approval_decision", policy["approval_decision"]),
+            "expires_at": record.get("expires_at"),
+        }
+
+    @classmethod
+    def _normalize_policy(cls, policy: dict[str, Any]) -> dict[str, Any]:
+        governance_score = int(policy.get("governance_score") or 0)
+        estimated_cost = float(policy.get("estimated_cost") or policy.get("estimated_monthly_cost") or 0)
+        approval_decision = policy.get("approval_decision") or policy.get("final_decision") or "approval_required"
+
+        policy.setdefault("estimated_monthly_cost", estimated_cost)
+        policy.setdefault("estimated_cost", estimated_cost)
+        policy.setdefault("approval_decision", approval_decision)
+        policy.setdefault("risk_level", cls._risk_level(governance_score))
+        return policy
+
+    @staticmethod
+    def _risk_level(governance_score: int) -> str:
+        if governance_score <= 30:
+            return "low"
+
+        if governance_score <= 60:
+            return "medium"
+
+        return "high"
 
     @staticmethod
     def _normalize_lifetime(lifetime_days: Any) -> str:

@@ -184,8 +184,11 @@ class OpenStackRequestPolicyResult(BaseModel):
         "approval_required",
     ]
     final_decision: Literal["auto_approved", "approval_required"]
+    approval_decision: Literal["auto_approved", "approval_required"]
     governance_score: int
     estimated_monthly_cost: float
+    estimated_cost: float
+    risk_level: Literal["low", "medium", "high"]
     reasons: list[str]
 
 
@@ -217,6 +220,10 @@ class OpenStackVMRequestRecord(BaseModel):
     owner_role: str | None = None
     request: OpenStackVMRequest
     policy: OpenStackRequestPolicyResult
+    estimated_cost: float | None = None
+    risk_level: Literal["low", "medium", "high"] | None = None
+    governance_score: int | None = None
+    approval_decision: Literal["auto_approved", "approval_required"] | None = None
     server: dict[str, Any] | None = None
     rejection_reason: str | None = None
     provisioning_error: str | None = None
@@ -233,6 +240,10 @@ class OpenStackVMRequestResponse(BaseModel):
     owner: str | None = None
     owner_role: str | None = None
     policy: OpenStackRequestPolicyResult
+    estimated_cost: float | None = None
+    risk_level: Literal["low", "medium", "high"] | None = None
+    governance_score: int | None = None
+    approval_decision: Literal["auto_approved", "approval_required"] | None = None
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest
     provisioning_error: str | None = None

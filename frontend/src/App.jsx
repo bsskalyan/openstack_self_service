@@ -699,8 +699,8 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                       </span>
                     </td>
                     <td>{request.policy?.governance_score ?? "-"}</td>
-                    <td>{formatDecision(request.policy?.final_decision)}</td>
-                    <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
+                    <td>{formatDecision(getApprovalDecision(request.policy))}</td>
+                    <td>{formatCurrency(getEstimatedCost(request.policy))}</td>
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
                     <td>{formatPackages(request.request?.packages)}</td>
@@ -860,9 +860,9 @@ function AdminApprovalDashboard({
                     <td>{request.request?.project_name || "-"}</td>
                     <td>{request.request?.cost_center || "-"}</td>
                     <td>{getRequestApplicationName(request)}</td>
-                    <td>{formatCurrency(request.policy?.estimated_monthly_cost)}</td>
+                    <td>{formatCurrency(getEstimatedCost(request.policy))}</td>
                     <td>{request.policy?.governance_score ?? "-"}</td>
-                    <td>{formatDecision(request.policy?.final_decision)}</td>
+                    <td>{formatDecision(getApprovalDecision(request.policy))}</td>
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
                     <td>{formatPackages(request.request?.packages)}</td>
@@ -964,9 +964,10 @@ function AdminRequestDetailsPanel({
         <Detail label="Lifetime" value={formatLifetime(payload)} />
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Packages" value={formatPackages(payload.packages)} />
-        <Detail label="Estimated cost" value={`${formatCurrency(policy.estimated_monthly_cost)} / month`} />
+        <Detail label="Estimated cost" value={`${formatCurrency(getEstimatedCost(policy))} / month`} />
         <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
-        <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
+        <Detail label="Risk level" value={policy.risk_level} />
+        <Detail label="Approval decision" value={formatDecision(getApprovalDecision(policy))} />
         <Detail label="Resources" value={formatRequestedResources(payload)} />
       </dl>
 
@@ -1071,10 +1072,11 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Packages" value={formatPackages(payload.packages)} />
         <Detail label="Provider" value="OpenStack" />
-        <Detail label="Approval decision" value={formatDecision(policy.final_decision)} />
+        <Detail label="Approval decision" value={formatDecision(getApprovalDecision(policy))} />
         <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
         <Detail label="Governance score" value={policy.governance_score} />
-        <Detail label="Estimated cost" value={formatCurrency(policy.estimated_monthly_cost)} />
+        <Detail label="Risk level" value={policy.risk_level} />
+        <Detail label="Estimated cost" value={formatCurrency(getEstimatedCost(policy))} />
         <Detail label="Created" value={formatDateTime(request.created_at)} />
       </dl>
 
@@ -1155,7 +1157,7 @@ function GovernanceExplanation({ policy, request }) {
       <h4>Governance Score Explanation</h4>
       <div className="score-summary">
         <strong>{policy.governance_score ?? 0} / 100</strong>
-        <span>{formatDecision(policy.final_decision)}</span>
+        <span>{formatDecision(getApprovalDecision(policy))}</span>
       </div>
       <ul className="governance-reasons">
         {reasons.map((reason) => (
@@ -1579,6 +1581,19 @@ function CreateVmForm({
     );
   }, [flavors, images, initialValues, keypairs, networks, providerReachable, securityGroups]);
 
+  useEffect(() => {
+    const estimatedMonthlyCost = String(governance.estimatedMonthlyCost);
+    if (form.estimated_monthly_cost === estimatedMonthlyCost && form.risk_level === governance.riskLevel) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      estimated_monthly_cost: estimatedMonthlyCost,
+      risk_level: governance.riskLevel,
+    }));
+  }, [form.estimated_monthly_cost, form.risk_level, governance.estimatedMonthlyCost, governance.riskLevel]);
+
   function updateField(event) {
     const { checked, name, type, value } = event.target;
     if (name === "packages") {
@@ -1893,18 +1908,13 @@ function CreateVmForm({
           Estimated cost
           <input
             name="estimated_monthly_cost"
-            onChange={updateField}
             readOnly
-            value={
-              form.estimated_monthly_cost
-                ? formatCurrency(Number(form.estimated_monthly_cost))
-                : ""
-            }
+            value={formatCurrency(form.estimated_monthly_cost)}
           />
         </label>
         <label>
           Risk level
-          <input name="risk_level" onChange={updateField} readOnly value={form.risk_level} />
+          <input name="risk_level" readOnly value={form.risk_level} />
         </label>
         <label className="checkbox-label">
           <input
@@ -1951,11 +1961,12 @@ function RequestSubmissionResult({ result }) {
         <Detail label="Lifetime" value={formatLifetime(result.request)} />
         <Detail label="Expires at" value={formatDateTime(result.expires_at)} />
         <Detail label="Packages" value={formatPackages(result.request?.packages)} />
-        <Detail label="Approval decision" value={formatDecision(result.policy?.final_decision)} />
+        <Detail label="Approval decision" value={formatDecision(getApprovalDecision(result.policy))} />
         <Detail label="Governance score" value={result.policy?.governance_score} />
+        <Detail label="Risk level" value={result.policy?.risk_level} />
         <Detail
           label="Estimated cost"
-          value={formatCurrency(result.policy?.estimated_monthly_cost)}
+          value={formatCurrency(getEstimatedCost(result.policy))}
         />
       </dl>
       {result.provisioning_error && (
@@ -2103,14 +2114,14 @@ function ReviewSubmitSummary({
         <ReviewGroup title="Governance Evaluation">
           <Detail label="Decision" value={decision} />
           <Detail label="Governance score" value={`${governance.score} / 100`} />
+          <Detail label="Risk level" value={governance.riskLevel} />
+          <Detail label="Approval decision" value={decision} />
           <Detail label="Governance action" value={formatDecision(governance.governanceDecision)} />
           <Detail label="Reason" value={governance.reasons.length ? governance.reasons.join(", ") : "No policy concerns detected"} />
         </ReviewGroup>
 
         <ReviewGroup title="Estimated Cost">
           <Detail label="Monthly estimate" value={`${formatCurrency(governance.estimatedMonthlyCost)} / month`} />
-          <Detail label="Catalog estimate" value={form.estimated_monthly_cost ? `${formatCurrency(form.estimated_monthly_cost)} / month` : ""} />
-          <Detail label="Catalog risk level" value={form.risk_level} />
         </ReviewGroup>
       </div>
     </section>
@@ -2681,11 +2692,20 @@ function getCostBreakdown(request, policy = {}) {
   const ram = Number(request?.ram_gb || 0) * 150;
   const disk = Number(request?.disk_gb || 0) * 5;
   const calculatedTotal = cpu + ram + disk;
-  const total = Number.isFinite(Number(policy.estimated_monthly_cost))
-    ? Number(policy.estimated_monthly_cost)
+  const policyTotal = getEstimatedCost(policy);
+  const total = Number.isFinite(Number(policyTotal))
+    ? Number(policyTotal)
     : calculatedTotal;
 
   return { cpu, ram, disk, total };
+}
+
+function getEstimatedCost(policy = {}) {
+  return policy.estimated_cost ?? policy.estimated_monthly_cost;
+}
+
+function getApprovalDecision(policy = {}) {
+  return policy.approval_decision ?? policy.final_decision;
 }
 
 function buildGovernanceReasons(policy = {}, request = {}) {
@@ -2976,10 +2996,7 @@ function evaluateGovernancePreview(form) {
   const hasDatabasePackage = selectedPackages.has("postgresql") || selectedPackages.has("mysql");
   const hasPublicWebPackage =
     publicIpRequired && (selectedPackages.has("nginx") || selectedPackages.has("apache"));
-  const catalogCost = Number(form.estimated_monthly_cost);
-  const estimatedMonthlyCost = Number.isFinite(catalogCost) && catalogCost > 0
-    ? catalogCost
-    : cpu * 500 + ramGb * 150 + diskGb * 5;
+  const estimatedMonthlyCost = cpu * 500 + ramGb * 150 + diskGb * 5;
   const reasons = [];
 
   const basicAutoApproved =
@@ -3059,8 +3076,21 @@ function evaluateGovernancePreview(form) {
     finalDecision,
     governanceDecision,
     reasons,
+    riskLevel: getRiskLevel(score),
     score,
   };
+}
+
+function getRiskLevel(score) {
+  if (score <= 30) {
+    return "low";
+  }
+
+  if (score <= 60) {
+    return "medium";
+  }
+
+  return "high";
 }
 
 function isCustomImage(imageId) {
