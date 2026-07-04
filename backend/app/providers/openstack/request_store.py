@@ -72,6 +72,8 @@ class OpenStackRequestStore:
             "risk_level": record.get("risk_level", policy["risk_level"]),
             "governance_score": record.get("governance_score", policy["governance_score"]),
             "approval_decision": record.get("approval_decision", policy["approval_decision"]),
+            "cloud_init_generated": record.get("cloud_init_generated", bool(request["packages"])),
+            "selected_packages": record.get("selected_packages", request["packages"]),
             "expires_at": record.get("expires_at"),
         }
 

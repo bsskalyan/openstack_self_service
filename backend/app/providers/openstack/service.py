@@ -237,6 +237,7 @@ class OpenStackService:
         key_name: str | None = None,
         security_group_id: str | None = None,
         metadata: dict[str, str] | None = None,
+        user_data: str | None = None,
     ) -> dict[str, Any]:
         try:
             self._validate_network_id(network_id)
@@ -257,6 +258,9 @@ class OpenStackService:
 
             if metadata:
                 server_payload["metadata"] = metadata
+
+            if user_data:
+                server_payload["user_data"] = user_data
 
             if security_group_id:
                 security_group = connection.network.find_security_group(
@@ -413,6 +417,7 @@ class OpenStackService:
                 network_id=request.network_id,
                 key_name=request.key_name,
                 security_group_id=request.security_group_id,
+                user_data=self._build_cloud_init_user_data(request.packages),
                 metadata=self._build_server_metadata(
                     owner=owner,
                     owner_role=owner_role,
@@ -584,6 +589,7 @@ class OpenStackService:
                 network_id=request.network_id,
                 key_name=request.key_name,
                 security_group_id=request.security_group_id,
+                user_data=self._build_cloud_init_user_data(request.packages),
                 metadata=self._build_server_metadata(
                     owner=record.get("owner"),
                     owner_role=record.get("owner_role"),
@@ -974,6 +980,8 @@ class OpenStackService:
             "risk_level": policy_result.risk_level,
             "governance_score": policy_result.governance_score,
             "approval_decision": policy_result.approval_decision,
+            "cloud_init_generated": bool(request.packages),
+            "selected_packages": request.packages,
             "server": server,
             "rejection_reason": None,
             "provisioning_error": provisioning_error,
@@ -1074,6 +1082,52 @@ class OpenStackService:
     @staticmethod
     def _format_packages(request: OpenStackVMRequest) -> str:
         return ", ".join(request.packages) if request.packages else "None"
+
+    @staticmethod
+    def _build_cloud_init_user_data(packages: list[str]) -> str | None:
+        package_map = {
+            "Docker": ["docker.io"],
+            "Podman": ["podman"],
+            "Nginx": ["nginx"],
+            "Apache": ["apache2"],
+            "Node.js": ["nodejs", "npm"],
+            "Python": ["python3", "python3-pip", "python3-venv"],
+            "PostgreSQL": ["postgresql-client"],
+            "MySQL": ["mysql-client"],
+            "Git": ["git"],
+            "Ansible": ["ansible"],
+        }
+        service_commands = {
+            "Docker": ["systemctl enable --now docker"],
+            "Nginx": ["systemctl enable --now nginx"],
+            "Apache": ["systemctl enable --now apache2"],
+        }
+
+        os_packages: list[str] = []
+        runcmd: list[str] = []
+        for package in packages:
+            for os_package in package_map.get(package, []):
+                if os_package not in os_packages:
+                    os_packages.append(os_package)
+            for command in service_commands.get(package, []):
+                if command not in runcmd:
+                    runcmd.append(command)
+
+        if not os_packages and not runcmd:
+            return None
+
+        lines = [
+            "#cloud-config",
+            "package_update: true",
+            "package_upgrade: false",
+            "packages:",
+            *[f"  - {package}" for package in os_packages],
+        ]
+
+        if runcmd:
+            lines.extend(["runcmd:", *[f"  - {command}" for command in runcmd]])
+
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _validate_network_id(network_id: str) -> None:

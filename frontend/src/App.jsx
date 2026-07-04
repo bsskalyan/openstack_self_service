@@ -674,6 +674,7 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                 <th>Environment</th>
                 <th>Lifetime</th>
                 <th>Packages</th>
+                <th>Cloud-init</th>
                 <th>Created Time</th>
                 <th>Provider</th>
               </tr>
@@ -704,13 +705,14 @@ function MyRequestsPage({ currentUser, loading, onError, requests, selectedProvi
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
                     <td>{formatPackages(request.request?.packages)}</td>
+                    <td>{formatCloudInitStatus(request)}</td>
                     <td>{formatDateTime(request.created_at)}</td>
                     <td>OpenStack</td>
                   </tr>
                 ))}
               {!loading && requests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={13}>
+                  <td className="empty-state-cell" colSpan={14}>
                     <div className="empty-state">
                       <strong>No requests found</strong>
                       <span>Submit a catalog request to see it here.</span>
@@ -840,6 +842,7 @@ function AdminApprovalDashboard({
                 <th>Environment</th>
                 <th>Lifetime</th>
                 <th>Packages</th>
+                <th>Cloud-init</th>
                 <th>Requested Resources</th>
                 <th>Status</th>
               </tr>
@@ -866,6 +869,7 @@ function AdminApprovalDashboard({
                     <td>{formatEnvironment(request.request?.environment)}</td>
                     <td>{formatLifetime(request.request)}</td>
                     <td>{formatPackages(request.request?.packages)}</td>
+                    <td>{formatCloudInitStatus(request)}</td>
                     <td>{formatRequestedResources(request.request)}</td>
                     <td>
                       <span className={`request-status ${normalizeStatus(request.status)}`}>
@@ -876,7 +880,7 @@ function AdminApprovalDashboard({
                 ))}
               {!loading && pendingRequests.length === 0 && (
                 <tr>
-                  <td className="empty-state-cell" colSpan={13}>
+                  <td className="empty-state-cell" colSpan={14}>
                     <div className="empty-state">
                       <strong>No pending approvals</strong>
                       <span>Auto-approved, rejected, and provisioned requests do not appear here.</span>
@@ -964,6 +968,7 @@ function AdminRequestDetailsPanel({
         <Detail label="Lifetime" value={formatLifetime(payload)} />
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Packages" value={formatPackages(payload.packages)} />
+        <Detail label="Cloud-init" value={formatCloudInitStatus(request)} />
         <Detail label="Estimated cost" value={`${formatCurrency(getEstimatedCost(policy))} / month`} />
         <Detail label="Risk score" value={`${policy.governance_score ?? "-"} / 100`} />
         <Detail label="Risk level" value={policy.risk_level} />
@@ -1071,6 +1076,7 @@ function RequestDetailsPanel({ loading, onClose, request }) {
         <Detail label="Lifetime" value={formatLifetime(payload)} />
         <Detail label="Expires at" value={formatDateTime(request.expires_at)} />
         <Detail label="Packages" value={formatPackages(payload.packages)} />
+        <Detail label="Cloud-init" value={formatCloudInitStatus(request)} />
         <Detail label="Provider" value="OpenStack" />
         <Detail label="Approval decision" value={formatDecision(getApprovalDecision(policy))} />
         <Detail label="Governance decision" value={formatDecision(policy.governance_decision)} />
@@ -1889,6 +1895,9 @@ function CreateVmForm({
         </label>
         <section className="business-info-section">
           <h3>Additional Packages</h3>
+          <p className="field-hint">
+            Selected packages will be installed automatically during first boot.
+          </p>
           <div className="package-checkbox-grid">
             {packageOptions.map((packageName) => (
               <label className="checkbox-label package-checkbox" key={packageName}>
@@ -1961,6 +1970,7 @@ function RequestSubmissionResult({ result }) {
         <Detail label="Lifetime" value={formatLifetime(result.request)} />
         <Detail label="Expires at" value={formatDateTime(result.expires_at)} />
         <Detail label="Packages" value={formatPackages(result.request?.packages)} />
+        <Detail label="Cloud-init" value={formatCloudInitStatus(result)} />
         <Detail label="Approval decision" value={formatDecision(getApprovalDecision(result.policy))} />
         <Detail label="Governance score" value={result.policy?.governance_score} />
         <Detail label="Risk level" value={result.policy?.risk_level} />
@@ -2109,6 +2119,10 @@ function ReviewSubmitSummary({
 
         <ReviewGroup title="Additional Packages">
           <Detail label="Selected packages" value={formatPackages(form.packages)} />
+          <Detail
+            label="Cloud-init"
+            value={form.packages.length > 0 ? "Generated during provisioning" : "No package install requested"}
+          />
         </ReviewGroup>
 
         <ReviewGroup title="Governance Evaluation">
@@ -2604,6 +2618,15 @@ function normalizePackageSelection(packages) {
 
 function formatPackages(packages) {
   return Array.isArray(packages) && packages.length > 0 ? packages.join(", ") : "-";
+}
+
+function formatCloudInitStatus(record) {
+  const packages = record?.selected_packages ?? record?.request?.packages ?? [];
+  if (!Array.isArray(packages) || packages.length === 0) {
+    return "Not requested";
+  }
+
+  return record?.cloud_init_generated ? "Generated" : "Pending";
 }
 
 function getMissingRequiredFields(form) {

@@ -224,6 +224,8 @@ class OpenStackVMRequestRecord(BaseModel):
     risk_level: Literal["low", "medium", "high"] | None = None
     governance_score: int | None = None
     approval_decision: Literal["auto_approved", "approval_required"] | None = None
+    cloud_init_generated: bool = False
+    selected_packages: list[str] = Field(default_factory=list)
     server: dict[str, Any] | None = None
     rejection_reason: str | None = None
     provisioning_error: str | None = None
@@ -244,6 +246,8 @@ class OpenStackVMRequestResponse(BaseModel):
     risk_level: Literal["low", "medium", "high"] | None = None
     governance_score: int | None = None
     approval_decision: Literal["auto_approved", "approval_required"] | None = None
+    cloud_init_generated: bool = False
+    selected_packages: list[str] = Field(default_factory=list)
     server: dict[str, Any] | None = None
     request: OpenStackVMRequest
     provisioning_error: str | None = None
