@@ -130,5 +130,65 @@
     "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
     "status": "succeeded",
     "message": "VM provisioned with server id 'fb945c6b-9d98-46f8-82cb-b04537fe2d5a'"
+  },
+  {
+    "id": "6b38cf96-a78e-4937-b3cc-cf1bcdb1405a",
+    "timestamp": "2026-07-04T05:59:33.965597+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "server_deleted",
+    "resource_type": "server",
+    "resource_id": "78bef1c8-0154-4e07-8bf9-0971606daa99",
+    "request_id": "d83784ab-f473-47dd-8101-698569d3a13b",
+    "status": "accepted",
+    "message": "Server 'ubuntu-vm' delete requested"
+  },
+  {
+    "id": "83c75ddf-2613-4441-a322-a0f90a32b2e5",
+    "timestamp": "2026-07-04T05:59:37.542192+00:00",
+    "actor": "Morgan Admin",
+    "role": "admin",
+    "action": "server_deleted",
+    "resource_type": "server",
+    "resource_id": "fb945c6b-9d98-46f8-82cb-b04537fe2d5a",
+    "request_id": "bf4e2cc4-d138-4690-a054-9a3aa2a5465b",
+    "status": "accepted",
+    "message": "Server 'ubuntu-vm' delete requested"
+  },
+  {
+    "id": "7da13f91-8770-4039-a1dd-c663ec62f1a2",
+    "timestamp": "2026-07-04T06:50:32.232066+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "server_rebooted",
+    "resource_type": "server",
+    "resource_id": "365c2962-4386-4f86-943b-e7f0fbc36af4",
+    "request_id": "be35d453-cc7b-4d5b-828e-502a6480eb54",
+    "status": "accepted",
+    "message": "Server 'ubuntu-vm' soft reboot requested"
+  },
+  {
+    "id": "aa01bf7c-b631-488d-bc04-a25a53db46e5",
+    "timestamp": "2026-07-04T09:35:14.277254+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "server_rebooted",
+    "resource_type": "server",
+    "resource_id": "365c2962-4386-4f86-943b-e7f0fbc36af4",
+    "request_id": "be35d453-cc7b-4d5b-828e-502a6480eb54",
+    "status": "accepted",
+    "message": "Server 'ubuntu-vm' hard reboot requested"
+  },
+  {
+    "id": "541278e7-259a-4880-8266-d609d09123e1",
+    "timestamp": "2026-07-04T11:07:05.928483+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "snapshot_created",
+    "resource_type": "snapshot",
+    "resource_id": "ac41cb0d-1e14-41fd-9a8b-876ae93279c0",
+    "request_id": null,
+    "status": "accepted",
+    "message": "Snapshot 'test' created for server '365c2962-4386-4f86-943b-e7f0fbc36af4'."
   }
 ]

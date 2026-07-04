@@ -1,12 +1,34 @@
 const API_BASE_URL = "http://10.161.230.18:8000/api/v1";
+const USER_STORAGE_KEY = "cms-current-user";
 
 let currentUser = {
   name: "Asha Engineer",
   role: "engineer",
 };
 
+try {
+  const storedUser = window.localStorage.getItem(USER_STORAGE_KEY);
+  if (storedUser) {
+    currentUser = JSON.parse(storedUser);
+  }
+} catch {
+  currentUser = {
+    name: "Asha Engineer",
+    role: "engineer",
+  };
+}
+
 export function setApiUser(user) {
   currentUser = user;
+  window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+export function buildSshConsoleWebSocketUrl(serverId) {
+  const url = new URL(`${API_BASE_URL}/openstack/servers/${serverId}/ssh/ws`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("user", currentUser.name);
+  url.searchParams.set("role", currentUser.role);
+  return url.toString();
 }
 
 async function request(path, options = {}) {
@@ -91,6 +113,20 @@ export const api = {
     request(`/openstack/servers/${serverId}/reboot`, {
       method: "POST",
       body: JSON.stringify({ reboot_type: "HARD" }),
+    }),
+  getServerConsole: (serverId) => request(`/openstack/servers/${serverId}/console`),
+  getSshConsoleMetadata: (serverId) => request(`/openstack/servers/${serverId}/ssh-console`),
+  listServerSnapshots: (serverId) => request(`/openstack/servers/${serverId}/snapshots`),
+  createServerSnapshot: (serverId, payload) =>
+    request(`/openstack/servers/${serverId}/snapshots`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteSnapshot: (snapshotId) =>
+    request(`/openstack/snapshots/${snapshotId}`, { method: "DELETE" }),
+  restoreSnapshot: (serverId, snapshotId) =>
+    request(`/openstack/servers/${serverId}/restore-snapshot/${snapshotId}`, {
+      method: "POST",
     }),
   deleteServer: (serverId) =>
     request(`/openstack/servers/${serverId}`, { method: "DELETE" }),

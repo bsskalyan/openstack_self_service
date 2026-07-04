@@ -39,6 +39,19 @@ class Settings(BaseSettings):
         validation_alias="OS_PROJECT_DOMAIN_ID",
     )
     os_region_name: str | None = Field(default=None, validation_alias="OS_REGION_NAME")
+    ssh_private_key_path: str | None = Field(
+        default=None,
+        validation_alias="SSH_PRIVATE_KEY_PATH",
+    )
+    ssh_known_hosts_path: str | None = Field(
+        default=None,
+        validation_alias="SSH_KNOWN_HOSTS_PATH",
+    )
+    ssh_default_username: str = Field(default="ubuntu", validation_alias="SSH_DEFAULT_USERNAME")
+    ssh_session_timeout_seconds: int = Field(
+        default=1800,
+        validation_alias="SSH_SESSION_TIMEOUT_SECONDS",
+    )
 
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),

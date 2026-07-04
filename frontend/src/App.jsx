@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 
-import { api, setApiUser } from "./api";
+import { api, buildSshConsoleWebSocketUrl, setApiUser } from "./api";
 
 const mockUsers = [
   { id: "engineer", name: "Asha Engineer", role: "engineer", label: "Engineer" },
@@ -78,6 +80,19 @@ const emptyCreateForm = {
   risk_level: "",
   catalog_service_name: "",
 };
+
+function getInitialUser() {
+  try {
+    const storedUser = JSON.parse(window.localStorage.getItem("cms-current-user"));
+    if (storedUser?.name && storedUser?.role) {
+      return storedUser;
+    }
+  } catch {
+    return mockUsers[0];
+  }
+
+  return mockUsers[0];
+}
 
 function useOpenStackData(currentUser) {
   const [data, setData] = useState({
@@ -219,10 +234,11 @@ export default function App() {
   const [providers, setProviders] = useState([]);
   const [selectedProviderId, setSelectedProviderId] = useState("openstack");
   const [requestDefaults, setRequestDefaults] = useState(emptyCreateForm);
-  const [currentUser, setCurrentUser] = useState(mockUsers[0]);
+  const [currentUser, setCurrentUser] = useState(getInitialUser);
   const [theme, setTheme] = useState(() => window.localStorage.getItem("cms-theme") || "light");
   const { data, loading, error, providerReachable, setError, refresh } =
     useOpenStackData(currentUser);
+  const sshConsoleMatch = window.location.pathname.match(/^\/console\/ssh\/([^/]+)$/);
   const activeTabAllowed = canAccessTab(activeTab, currentUser.role);
   const selectedProvider =
     providers.find((provider) => provider.id === selectedProviderId) ??
@@ -252,6 +268,16 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("cms-theme", theme);
   }, [theme]);
+
+  if (sshConsoleMatch) {
+    return (
+      <SshConsolePage
+        currentUser={currentUser}
+        serverId={decodeURIComponent(sshConsoleMatch[1])}
+        theme={theme}
+      />
+    );
+  }
 
   function showToast(message, type = "success") {
     const id = window.crypto?.randomUUID?.() ?? String(Date.now());
@@ -396,6 +422,8 @@ export default function App() {
             selectedProvider={selectedProvider}
             vmRequests={data.vmRequests}
             onAction={runAction}
+            onError={setError}
+            onToast={showToast}
           />
         )}
         {activeTabAllowed && activeTab === "create" && (
@@ -440,6 +468,167 @@ export default function App() {
         toasts={toasts}
       />
     </div>
+  );
+}
+
+function SshConsolePage({ currentUser, serverId, theme }) {
+  const [metadata, setMetadata] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState("idle");
+  const terminalElementRef = useRef(null);
+  const terminalRef = useRef(null);
+  const socketRef = useRef(null);
+
+  useEffect(() => {
+    setApiUser(currentUser);
+    setLoading(true);
+    setError("");
+    api.getSshConsoleMetadata(serverId).then(
+      (value) => {
+        setMetadata(value);
+        setLoading(false);
+      },
+      (err) => {
+        setError(err.message);
+        setLoading(false);
+      },
+    );
+  }, [currentUser, serverId]);
+
+  useEffect(() => {
+    if (!metadata || (!metadata.floating_ip && !metadata.private_ip) || !terminalElementRef.current) {
+      return undefined;
+    }
+
+    const terminal = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontFamily: "'Cascadia Mono', 'Consolas', monospace",
+      fontSize: 14,
+      rows: 28,
+      theme: {
+        background: "#020617",
+        foreground: "#d1fae5",
+        cursor: "#38bdf8",
+      },
+    });
+    terminal.open(terminalElementRef.current);
+    terminal.focus();
+    terminalRef.current = terminal;
+    terminal.writeln("Connecting to CMS SSH console...");
+
+    const socket = new WebSocket(buildSshConsoleWebSocketUrl(serverId));
+    socketRef.current = socket;
+    setConnectionStatus("connecting");
+
+    socket.addEventListener("open", () => {
+      setConnectionStatus("connected");
+      terminal.writeln("WebSocket connected. Opening SSH session...");
+    });
+    socket.addEventListener("message", (event) => {
+      terminal.write(event.data);
+    });
+    socket.addEventListener("error", () => {
+      setConnectionStatus("error");
+      terminal.writeln("\r\nConnection error. Check backend SSH console configuration.\r\n");
+    });
+    socket.addEventListener("close", () => {
+      setConnectionStatus((current) => (current === "error" ? current : "closed"));
+      terminal.writeln("\r\nSession closed.\r\n");
+    });
+
+    const disposable = terminal.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(data);
+      }
+    });
+
+    return () => {
+      disposable.dispose();
+      socket.close();
+      terminal.dispose();
+      terminalRef.current = null;
+      socketRef.current = null;
+    };
+  }, [metadata, serverId]);
+
+  const hasFloatingIp = Boolean(metadata?.floating_ip);
+  const canAttemptSsh = Boolean(metadata?.floating_ip || metadata?.private_ip);
+
+  return (
+    <main className={`ssh-console-page theme-${theme}`}>
+      <section className="ssh-console-shell">
+        <header className="ssh-console-header">
+          <div>
+            <p className="eyebrow">CMS CLI Console</p>
+            <h1>{metadata?.server_name || shortId(serverId)}</h1>
+            <p>Secure browser terminal backed by a FastAPI WebSocket SSH session.</p>
+          </div>
+          <RoleBadge user={currentUser} />
+        </header>
+
+        {loading && (
+          <div className="terminal-window">
+            <span className="spinner" />
+            <p>Loading CLI console metadata...</p>
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="terminal-window terminal-error">
+            <p>Not authorized or unable to load CLI console metadata.</p>
+            <pre>{error}</pre>
+          </div>
+        )}
+
+        {!loading && !error && metadata && (
+          <div className="terminal-window">
+            <div className="terminal-titlebar">
+              <span />
+              <span />
+              <span />
+              <strong>{metadata.server_name || metadata.server_id}</strong>
+            </div>
+            <div className="terminal-body">
+              <p>
+                <span className="terminal-prompt">cms@console</span>
+                {canAttemptSsh ? ` ${connectionStatus}` : " Waiting for SSH reachability."}
+              </p>
+              <dl className="terminal-metadata">
+                <Detail label="Server ID" value={metadata.server_id} />
+                <Detail label="Private IP" value={metadata.private_ip} />
+                <Detail label="Floating IP" value={metadata.floating_ip} />
+                <Detail label="Suggested user" value={metadata.username_suggestion} />
+                <Detail label="Status" value={metadata.connection_status} />
+              </dl>
+              {canAttemptSsh ? (
+                <>
+                  {!hasFloatingIp && (
+                    <p className="terminal-warning">
+                      CLI console requires SSH reachability. Attach a floating IP first.
+                    </p>
+                  )}
+                  <div className="xterm-host" ref={terminalElementRef} />
+                  <p className="terminal-note">
+                    Passwords and private keys are never exposed to the browser.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="terminal-warning">
+                    CLI console requires SSH reachability. Attach a floating IP first.
+                  </p>
+                  <p className="terminal-note">
+                    Passwords and private keys are never exposed to the browser.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
 
@@ -1330,10 +1519,14 @@ function ServersList({
   servers,
   vmRequests,
   onAction,
+  onError,
+  onToast,
 }) {
   const [pendingServer, setPendingServer] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedServer, setSelectedServer] = useState(null);
+  const [snapshotServer, setSnapshotServer] = useState(null);
+  const [rebootMenuServer, setRebootMenuServer] = useState(null);
 
   async function runServerAction(actionKey, label, server, action) {
     setPendingServer(`${server.id}:${actionKey}`);
@@ -1342,7 +1535,27 @@ function ServersList({
     } finally {
       setPendingServer(null);
       setConfirmDelete(null);
+      setRebootMenuServer(null);
     }
+  }
+
+  async function openWebConsole(server) {
+    setPendingServer(`${server.id}:console`);
+    try {
+      const result = await api.getServerConsole(server.id);
+      window.open(result.console_url, "_blank", "noopener,noreferrer");
+      onToast?.("Web console opened in a new tab.", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to open web console.";
+      onError?.(message);
+      onToast?.(message, "error");
+    } finally {
+      setPendingServer(null);
+    }
+  }
+
+  function openCliConsole(server) {
+    window.open(`/console/ssh/${encodeURIComponent(server.id)}`, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -1388,8 +1601,8 @@ function ServersList({
                 servers.map((server) => {
                   const ips = getServerIps(server.addresses);
                   const failure = getFailureDetails(server);
-                  const actionsAllowed =
-                    providerReachable && canManageServer(server, currentUser, vmRequests);
+                  const serverAccessAllowed = canManageServer(server, currentUser, vmRequests);
+                  const actionsAllowed = providerReachable && serverAccessAllowed;
                   return (
                     <tr className="clickable-row" key={server.id} onClick={() => setSelectedServer(server)}>
                       <td>
@@ -1416,54 +1629,83 @@ function ServersList({
                       <td>{ips.floatingIp ?? "-"}</td>
                       <td onClick={(event) => event.stopPropagation()}>
                         <div className="button-row server-actions">
-                        <ActionButton
-                          busy={pendingServer === `${server.id}:start`}
-                          disabled={!actionsAllowed}
-                          label="Start"
-                          onClick={() =>
-                            runServerAction("start", "Start server", server, () =>
-                              api.startServer(server.id),
-                            )
-                          }
-                        />
-                        <ActionButton
-                          busy={pendingServer === `${server.id}:stop`}
-                          disabled={!actionsAllowed}
-                          label="Stop"
-                          onClick={() =>
-                            runServerAction("stop", "Stop server", server, () =>
-                              api.stopServer(server.id),
-                            )
-                          }
-                        />
-                        <ActionButton
-                          busy={pendingServer === `${server.id}:soft-reboot`}
-                          disabled={!actionsAllowed}
-                          label="Soft Reboot"
-                          onClick={() =>
-                            runServerAction("soft-reboot", "Soft reboot server", server, () =>
-                              api.rebootServer(server.id),
-                            )
-                          }
-                        />
-                        <ActionButton
-                          busy={pendingServer === `${server.id}:hard-reboot`}
-                          disabled={!actionsAllowed}
-                          label="Hard Reboot"
-                          onClick={() =>
-                            runServerAction("hard-reboot", "Hard reboot server", server, () =>
-                              api.hardRebootServer(server.id),
-                            )
-                          }
-                        />
-                        <button
-                          className="danger"
-                          disabled={!actionsAllowed}
-                          onClick={() => setConfirmDelete(server)}
-                          type="button"
-                        >
-                          Delete
-                        </button>
+                          <ActionButton
+                            busy={pendingServer === `${server.id}:console`}
+                            disabled={!actionsAllowed}
+                            icon="console"
+                            label="Web Console"
+                            variant="primary"
+                            onClick={() => openWebConsole(server)}
+                          />
+                          <ActionButton
+                            disabled={!serverAccessAllowed}
+                            icon="terminal"
+                            label="CLI Console"
+                            variant="terminal"
+                            onClick={() => openCliConsole(server)}
+                          />
+                          <ActionButton
+                            disabled={!providerReachable}
+                            icon="snapshot"
+                            label="Snapshots"
+                            variant="neutral"
+                            onClick={() => setSnapshotServer(server)}
+                          />
+                          <ActionButton
+                            busy={pendingServer === `${server.id}:start`}
+                            disabled={!actionsAllowed}
+                            icon="power"
+                            label="Power On"
+                            variant="success"
+                            onClick={() =>
+                              runServerAction("start", "Power on server", server, () =>
+                                api.startServer(server.id),
+                              )
+                            }
+                          />
+                          <ActionButton
+                            busy={pendingServer === `${server.id}:stop`}
+                            disabled={!actionsAllowed}
+                            icon="shutdown"
+                            label="Shutdown"
+                            variant="warning"
+                            onClick={() =>
+                              runServerAction("stop", "Shutdown server", server, () =>
+                                api.stopServer(server.id),
+                              )
+                            }
+                          />
+                          <RebootActionButton
+                            disabled={!actionsAllowed}
+                            isOpen={rebootMenuServer === server.id}
+                            pendingServer={pendingServer}
+                            server={server}
+                            onToggle={() =>
+                              setRebootMenuServer((current) =>
+                                current === server.id ? null : server.id,
+                              )
+                            }
+                            onReboot={(type) =>
+                              runServerAction(
+                                `${type}-reboot`,
+                                type === "soft" ? "Soft reboot server" : "Hard reboot server",
+                                server,
+                                () =>
+                                  type === "soft"
+                                    ? api.rebootServer(server.id)
+                                    : api.hardRebootServer(server.id),
+                              )
+                            }
+                          />
+                          <button
+                            className="action-button action-danger"
+                            disabled={!actionsAllowed}
+                            onClick={() => setConfirmDelete(server)}
+                            type="button"
+                          >
+                            <ActionIcon name="delete" />
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1484,8 +1726,14 @@ function ServersList({
         </div>
 
         <ServerDetailsPanel
+          currentUser={currentUser}
+          providerReachable={providerReachable}
           server={selectedServer}
+          vmRequests={vmRequests}
           onClose={() => setSelectedServer(null)}
+          onAction={onAction}
+          onError={onError}
+          onToast={onToast}
         />
       </div>
 
@@ -1502,11 +1750,65 @@ function ServersList({
           title="Delete server"
         />
       )}
+      {snapshotServer && (
+        <ServerSnapshotsModal
+          canManage={providerReachable && canManageServer(snapshotServer, currentUser, vmRequests)}
+          currentUser={currentUser}
+          server={snapshotServer}
+          onAction={onAction}
+          onClose={() => setSnapshotServer(null)}
+          onError={onError}
+          onToast={onToast}
+        />
+      )}
     </section>
   );
 }
 
-function ServerDetailsPanel({ onClose, server }) {
+function ServerSnapshotsModal({
+  canManage,
+  currentUser,
+  onAction,
+  onClose,
+  onError,
+  onToast,
+  server,
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-modal="true" className="confirm-dialog snapshot-management-modal" role="dialog">
+        <div className="request-details-header">
+          <div>
+            <p className="eyebrow">Server</p>
+            <h3>{server.name || shortId(server.id)} snapshots</h3>
+          </div>
+          <button onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        <SnapshotManagement
+          canManage={canManage}
+          currentUser={currentUser}
+          onAction={onAction}
+          onError={onError}
+          onToast={onToast}
+          server={server}
+        />
+      </section>
+    </div>
+  );
+}
+
+function ServerDetailsPanel({
+  currentUser,
+  onAction,
+  onClose,
+  onError,
+  onToast,
+  providerReachable,
+  server,
+  vmRequests,
+}) {
   if (!server) {
     return (
       <aside className="request-details-panel empty-panel">
@@ -1519,6 +1821,7 @@ function ServerDetailsPanel({ onClose, server }) {
 
   const ips = getServerIps(server.addresses);
   const failure = getFailureDetails(server);
+  const canManageSnapshots = providerReachable && canManageServer(server, currentUser, vmRequests);
 
   return (
     <aside className="request-details-panel server-details-panel">
@@ -1548,9 +1851,259 @@ function ServerDetailsPanel({ onClose, server }) {
       </dl>
 
       {failure && <FailureNotice failure={failure} />}
+      <SnapshotManagement
+        canManage={canManageSnapshots}
+        currentUser={currentUser}
+        onAction={onAction}
+        onError={onError}
+        onToast={onToast}
+        server={server}
+      />
       <JsonBlock title="Addresses" value={server.addresses} />
       <JsonBlock title="Raw Server Data" value={server} />
     </aside>
+  );
+}
+
+function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast, server }) {
+  const [snapshots, setSnapshots] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [pendingSnapshot, setPendingSnapshot] = useState("");
+
+  async function loadSnapshots() {
+    if (!server?.id) {
+      return;
+    }
+    setLoading(true);
+    try {
+      setSnapshots(await api.listServerSnapshots(server.id));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load snapshots.";
+      onError?.(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSnapshots();
+  }, [server?.id]);
+
+  async function runSnapshotAction(label, action) {
+    try {
+      await onAction(label, action);
+      await loadSnapshots();
+    } catch {
+      // onAction already shows toast/error.
+    } finally {
+      setConfirmAction(null);
+      setPendingSnapshot("");
+    }
+  }
+
+  async function createSnapshot(payload) {
+    await runSnapshotAction("Create snapshot", () =>
+      api.createServerSnapshot(server.id, payload),
+    );
+    setCreateOpen(false);
+  }
+
+  return (
+    <section className="snapshot-section">
+      <div className="section-heading-row">
+        <div>
+          <p className="eyebrow">Recovery</p>
+          <h4>Snapshot Management</h4>
+        </div>
+        <div className="button-row">
+          <button disabled={loading} onClick={loadSnapshots} type="button">
+            View Snapshots
+          </button>
+          <button disabled={!canManage} onClick={() => setCreateOpen(true)} type="button">
+            Create Snapshot
+          </button>
+        </div>
+      </div>
+
+      {currentUser.role === "viewer" && (
+        <p className="field-hint">Viewer role can view snapshots only.</p>
+      )}
+
+      {loading ? (
+        <div className="table-loading inline-loading">
+          <span className="spinner small" />
+          <span>Loading snapshots...</span>
+        </div>
+      ) : (
+        <div className="snapshot-table-wrap">
+          <table className="snapshot-table">
+            <thead>
+              <tr>
+                <th>Snapshot name</th>
+                <th>Snapshot ID</th>
+                <th>Created date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshots.map((snapshot) => (
+                <tr key={snapshot.id}>
+                  <td>
+                    <strong>{snapshot.name || "-"}</strong>
+                    {snapshot.description && <small>{snapshot.description}</small>}
+                  </td>
+                  <td><small>{snapshot.id}</small></td>
+                  <td>{formatDateTime(snapshot.created_at)}</td>
+                  <td>
+                    <span className={`server-status ${normalizeStatus(snapshot.status)}`}>
+                      {snapshot.status || "unknown"}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="button-row snapshot-actions">
+                      <button
+                        disabled={!canManage}
+                        onClick={() => setConfirmAction({ type: "restore", snapshot })}
+                        type="button"
+                      >
+                        Restore
+                      </button>
+                      <button
+                        className="danger"
+                        disabled={!canManage}
+                        onClick={() => setConfirmAction({ type: "delete", snapshot })}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {snapshots.length === 0 && (
+                <tr>
+                  <td className="empty" colSpan={5}>
+                    No snapshots found for this VM.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="button-row snapshot-shortcuts">
+        <button disabled={!canManage} onClick={() => setCreateOpen(true)} type="button">
+          Create Snapshot
+        </button>
+        <button
+          disabled={!canManage || snapshots.length === 0}
+          onClick={() => setConfirmAction({ type: "delete", snapshot: snapshots[0] })}
+          type="button"
+        >
+          Delete Snapshot
+        </button>
+        <button
+          disabled={!canManage || snapshots.length === 0}
+          onClick={() => setConfirmAction({ type: "restore", snapshot: snapshots[0] })}
+          type="button"
+        >
+          Restore Snapshot
+        </button>
+      </div>
+
+      {createOpen && (
+        <CreateSnapshotModal
+          busy={Boolean(pendingSnapshot)}
+          onCancel={() => setCreateOpen(false)}
+          onSubmit={async (payload) => {
+            setPendingSnapshot("create");
+            await createSnapshot(payload);
+            setPendingSnapshot("");
+          }}
+        />
+      )}
+
+      {confirmAction && (
+        <ConfirmDialog
+          busy={pendingSnapshot === confirmAction.type}
+          confirmLabel={confirmAction.type === "delete" ? "Delete" : "Restore"}
+          danger={confirmAction.type === "delete"}
+          description={
+            confirmAction.type === "delete"
+              ? `Delete snapshot "${confirmAction.snapshot.name || confirmAction.snapshot.id}"? This action cannot be undone.`
+              : `Restore snapshot "${confirmAction.snapshot.name || confirmAction.snapshot.id}"? Snapshot restore creates a new VM from the selected snapshot.`
+          }
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setPendingSnapshot(confirmAction.type);
+            if (confirmAction.type === "delete") {
+              runSnapshotAction("Delete snapshot", () =>
+                api.deleteSnapshot(confirmAction.snapshot.id),
+              );
+              return;
+            }
+            runSnapshotAction("Restore snapshot", () =>
+              api.restoreSnapshot(server.id, confirmAction.snapshot.id),
+            );
+          }}
+          title={confirmAction.type === "delete" ? "Delete snapshot" : "Restore snapshot"}
+        />
+      )}
+    </section>
+  );
+}
+
+function CreateSnapshotModal({ busy, onCancel, onSubmit }) {
+  const [form, setForm] = useState({ name: "", description: "" });
+
+  function submit(event) {
+    event.preventDefault();
+    if (!form.name.trim()) {
+      return;
+    }
+    onSubmit({
+      name: form.name.trim(),
+      description: form.description.trim() || null,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form aria-modal="true" className="confirm-dialog snapshot-modal" onSubmit={submit} role="dialog">
+        <h3>Create snapshot</h3>
+        <label>
+          Snapshot name
+          <input
+            name="name"
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            required
+            value={form.name}
+          />
+        </label>
+        <label>
+          Description optional
+          <textarea
+            name="description"
+            onChange={(event) =>
+              setForm((current) => ({ ...current, description: event.target.value }))
+            }
+            value={form.description}
+          />
+        </label>
+        <div className="modal-actions">
+          <button disabled={busy} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary" disabled={busy || !form.name.trim()} type="submit">
+            {busy ? "Creating..." : "Create Snapshot"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -2347,16 +2900,136 @@ function MetricCard({ label, value, helper, tone, loading }) {
   );
 }
 
-function ActionButton({ busy, disabled = false, label, onClick }) {
+function ActionButton({ busy, disabled = false, icon, label, onClick, variant = "neutral" }) {
   return (
-    <button disabled={busy || disabled} onClick={onClick} type="button">
+    <button
+      className={`action-button action-${variant}`}
+      disabled={busy || disabled}
+      onClick={onClick}
+      type="button"
+    >
       {busy ? <span className="spinner small" /> : null}
+      {!busy && icon ? <ActionIcon name={icon} /> : null}
       {busy ? "Working" : label}
     </button>
   );
 }
 
-function ConfirmDialog({ busy, description, onCancel, onConfirm, title }) {
+function RebootActionButton({
+  disabled,
+  isOpen,
+  onReboot,
+  onToggle,
+  pendingServer,
+  server,
+}) {
+  const busy =
+    pendingServer === `${server.id}:soft-reboot` || pendingServer === `${server.id}:hard-reboot`;
+
+  return (
+    <div className="reboot-menu">
+      <button
+        className="action-button action-info"
+        disabled={busy || disabled}
+        onClick={onToggle}
+        type="button"
+      >
+        {busy ? <span className="spinner small" /> : <ActionIcon name="reboot" />}
+        {busy ? "Working" : "Reboot"}
+        <span className="chevron">v</span>
+      </button>
+      {isOpen && (
+        <div className="reboot-menu-list">
+          <button disabled={disabled} onClick={() => onReboot("soft")} type="button">
+            Soft Reboot
+          </button>
+          <button disabled={disabled} onClick={() => onReboot("hard")} type="button">
+            Hard Reboot
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionIcon({ name }) {
+  const paths = {
+    console: (
+      <>
+        <rect height="13" rx="2" width="16" x="4" y="5" />
+        <path d="M8 19h8" />
+      </>
+    ),
+    terminal: (
+      <>
+        <path d="m5 8 4 4-4 4" />
+        <path d="M11 16h7" />
+      </>
+    ),
+    snapshot: (
+      <>
+        <path d="M5 7h14v12H5z" />
+        <path d="M8 7V5h8v2" />
+        <path d="M8 13h8" />
+        <path d="M8 16h5" />
+      </>
+    ),
+    power: (
+      <>
+        <path d="M12 3v9" />
+        <path d="M7.1 7.1a7 7 0 1 0 9.8 0" />
+      </>
+    ),
+    shutdown: (
+      <>
+        <path d="M12 4v6" />
+        <path d="M8 8a6 6 0 1 0 8 0" />
+      </>
+    ),
+    reboot: (
+      <>
+        <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+        <path d="M20 4v7h-7" />
+      </>
+    ),
+    delete: (
+      <>
+        <path d="M4 7h16" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+        <path d="M6 7l1 13h10l1-13" />
+        <path d="M9 7V4h6v3" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      fill="none"
+      height="16"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="16"
+    >
+      {paths[name] ?? null}
+    </svg>
+  );
+}
+
+function ConfirmDialog({
+  busy,
+  confirmLabel = "Delete",
+  danger = true,
+  description,
+  onCancel,
+  onConfirm,
+  title,
+}) {
   return (
     <div className="modal-backdrop" role="presentation">
       <div aria-modal="true" className="confirm-dialog" role="dialog">
@@ -2366,8 +3039,13 @@ function ConfirmDialog({ busy, description, onCancel, onConfirm, title }) {
           <button disabled={busy} onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="danger solid" disabled={busy} onClick={onConfirm} type="button">
-            {busy ? "Deleting..." : "Delete"}
+          <button
+            className={danger ? "danger solid" : "primary"}
+            disabled={busy}
+            onClick={onConfirm}
+            type="button"
+          >
+            {busy ? "Working..." : confirmLabel}
           </button>
         </div>
       </div>

@@ -203,6 +203,354 @@ class OpenStackService:
                 f"Failed to list OpenStack floating IPs: {self._format_openstack_error(exc)}",
             ) from exc
 
+    def get_server_console(self, server_id: str, console_type: str = "novnc") -> dict[str, str]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            console = connection.compute.create_server_remote_console(
+                server,
+                protocol="vnc",
+                type=console_type,
+            )
+            console_url = self._extract_console_url(console)
+            if not console_url:
+                raise OpenStackServiceError("OpenStack did not return a console URL.")
+
+            logger.info(
+                "Created OpenStack console URL for server id='%s', type='%s'",
+                server_id,
+                console_type,
+            )
+            return {
+                "server_id": server_id,
+                "console_type": console_type,
+                "console_url": console_url,
+            }
+        except OpenStackServiceError:
+            raise
+        except SDKException as exc:
+            logger.exception("Failed to create OpenStack console for server id='%s'", server_id)
+            failure_details = self._build_failure_details(exc)
+            if failure_details["user_message"] == "OpenStack could not provision this VM.":
+                failure_details["user_message"] = "Unable to open OpenStack web console."
+                failure_details["suggested_action"] = (
+                    "Verify the server is available and the OpenStack console service is enabled."
+                )
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def get_server_ssh_console_metadata(self, server_id: str) -> dict[str, Any]:
+        try:
+            server = self.get_connection().compute.get_server(server_id)
+            addresses = getattr(server, "addresses", None)
+            private_ip, floating_ip = self._extract_server_ips(addresses)
+            username = self._suggest_ssh_username(server)
+            return {
+                "server_id": server_id,
+                "server_name": getattr(server, "name", None),
+                "private_ip": private_ip,
+                "floating_ip": floating_ip,
+                "username_suggestion": username,
+                "connection_status": "reachable" if floating_ip else "requires_floating_ip",
+            }
+        except SDKException as exc:
+            logger.exception("Failed to get SSH console metadata for server id='%s'", server_id)
+            failure_details = self._build_failure_details(exc)
+            if failure_details["user_message"] == "OpenStack could not provision this VM.":
+                failure_details["user_message"] = "Unable to load CLI console metadata."
+                failure_details["suggested_action"] = (
+                    "Verify the server exists and try again after OpenStack is reachable."
+                )
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def prepare_ssh_console_session(self, server_id: str) -> dict[str, Any]:
+        try:
+            server = self.get_connection().compute.get_server(server_id)
+            status = str(getattr(server, "status", "") or "").upper()
+            if status != "ACTIVE":
+                raise OpenStackValidationError(
+                    "VM is not active. Start the VM before opening CLI console.",
+                    failure_details={
+                        "user_message": "VM is not active.",
+                        "technical_reason": f"Server status is {status or 'unknown'}",
+                        "suggested_action": "Start the VM and try opening CLI console again.",
+                        "raw_error": {"server_id": server_id, "status": status or None},
+                    },
+                )
+
+            addresses = getattr(server, "addresses", None)
+            private_ip, floating_ip = self._extract_server_ips(addresses)
+            host = floating_ip or private_ip
+            if not host:
+                raise OpenStackValidationError(
+                    "No reachable IP address is available for CLI console.",
+                    failure_details={
+                        "user_message": "No reachable IP.",
+                        "technical_reason": (
+                            "Server has no floating IP or private IP in OpenStack addresses."
+                        ),
+                        "suggested_action": (
+                            "Attach a floating IP first or verify tenant network reachability."
+                        ),
+                        "raw_error": {"server_id": server_id, "addresses": addresses},
+                    },
+                )
+
+            return {
+                "server_id": server_id,
+                "server_name": getattr(server, "name", None),
+                "host": host,
+                "private_ip": private_ip,
+                "floating_ip": floating_ip,
+                "username": self._suggest_ssh_username(server),
+            }
+        except OpenStackServiceError:
+            raise
+        except SDKException as exc:
+            logger.exception("Failed to prepare SSH console session for server id='%s'", server_id)
+            failure_details = self._build_failure_details(exc)
+            if failure_details["user_message"] == "OpenStack could not provision this VM.":
+                failure_details["user_message"] = "Unable to prepare CLI console."
+                failure_details["suggested_action"] = "Verify the VM exists and try again."
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def record_console_audit_event(
+        self,
+        *,
+        actor: str,
+        role: str,
+        action: str,
+        server_id: str,
+        status: str,
+        message: str,
+    ) -> None:
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action=action,
+            resource_type="server",
+            resource_id=server_id,
+            request_id=None,
+            status=status,
+            message=message,
+        )
+
+    def create_server_snapshot(
+        self,
+        server_id: str,
+        *,
+        name: str,
+        description: str | None,
+        actor: str,
+        role: str,
+    ) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            server = connection.compute.get_server(server_id)
+            metadata = {
+                "cms_snapshot": "true",
+                "cms_snapshot_server_id": server_id,
+                "cms_snapshot_server_name": getattr(server, "name", "") or "",
+                "description": description or "",
+            }
+            snapshot_ref = connection.compute.create_server_image(
+                server,
+                name=name,
+                metadata=metadata,
+            )
+            snapshot_id = self._extract_resource_id(snapshot_ref) or str(snapshot_ref)
+            snapshot = connection.image.get_image(snapshot_id)
+            serialized = self._serialize_snapshot(snapshot)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_created",
+                resource_type="snapshot",
+                resource_id=snapshot_id,
+                request_id=None,
+                status="accepted",
+                message=f"Snapshot '{name}' created for server '{server_id}'.",
+            )
+            return serialized
+        except SDKException as exc:
+            logger.exception("Failed to create snapshot for server id='%s'", server_id)
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def list_server_snapshots(self, server_id: str) -> list[dict[str, Any]]:
+        try:
+            return [
+                self._serialize_snapshot(image)
+                for image in self.get_connection().image.images()
+                if self._snapshot_belongs_to_server(image, server_id)
+            ]
+        except SDKException as exc:
+            logger.exception("Failed to list snapshots for server id='%s'", server_id)
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def get_snapshot_server_id(self, snapshot_id: str) -> str | None:
+        try:
+            snapshot = self.get_connection().image.get_image(snapshot_id)
+            return self._extract_snapshot_server_id(snapshot)
+        except SDKException as exc:
+            logger.exception("Failed to resolve server id for snapshot id='%s'", snapshot_id)
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def delete_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        actor: str,
+        role: str,
+    ) -> dict[str, Any]:
+        try:
+            self.get_connection().image.delete_image(snapshot_id, ignore_missing=False)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_deleted",
+                resource_type="snapshot",
+                resource_id=snapshot_id,
+                request_id=None,
+                status="succeeded",
+                message=f"Snapshot '{snapshot_id}' deleted.",
+            )
+            return {
+                "id": snapshot_id,
+                "action": "delete",
+                "status": "accepted",
+                "message": "Snapshot deletion accepted.",
+                "server": None,
+            }
+        except SDKException as exc:
+            logger.exception("Failed to delete snapshot id='%s'", snapshot_id)
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
+    def restore_server_snapshot(
+        self,
+        server_id: str,
+        snapshot_id: str,
+        *,
+        actor: str,
+        role: str,
+    ) -> dict[str, Any]:
+        try:
+            connection = self.get_connection()
+            original_server = connection.compute.get_server(server_id)
+            snapshot = connection.image.get_image(snapshot_id)
+            snapshot_server_id = self._extract_snapshot_server_id(snapshot)
+            if snapshot_server_id and snapshot_server_id != server_id:
+                raise OpenStackValidationError(
+                    "Snapshot does not belong to this server.",
+                    failure_details={
+                        "user_message": "Snapshot does not belong to this server.",
+                        "technical_reason": (
+                            f"Snapshot server id '{snapshot_server_id}' does not match '{server_id}'."
+                        ),
+                        "suggested_action": "Choose a snapshot created from the selected VM.",
+                        "raw_error": {
+                            "server_id": server_id,
+                            "snapshot_id": snapshot_id,
+                            "snapshot_server_id": snapshot_server_id,
+                        },
+                    },
+                )
+
+            flavor_id = self._extract_server_flavor_id(original_server)
+            network_id = self._extract_primary_server_network_id(connection, original_server)
+            if not flavor_id or not network_id:
+                raise OpenStackValidationError(
+                    "Unable to restore snapshot because server flavor or network could not be resolved.",
+                    failure_details={
+                        "user_message": "Unable to restore snapshot.",
+                        "technical_reason": "Original server flavor or attached network was not available.",
+                        "suggested_action": "Verify the original server still has flavor and interface details.",
+                        "raw_error": {
+                            "server_id": server_id,
+                            "flavor_id": flavor_id,
+                            "network_id": network_id,
+                        },
+                    },
+                )
+
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_restore_requested",
+                resource_type="snapshot",
+                resource_id=snapshot_id,
+                request_id=None,
+                status="accepted",
+                message="Snapshot restore requested. A new VM will be created from the snapshot.",
+            )
+            restored_server = self.create_server(
+                name=f"{getattr(original_server, 'name', 'server')}-restored",
+                image_id=snapshot_id,
+                flavor_id=flavor_id,
+                network_id=network_id,
+                key_name=getattr(original_server, "key_name", None),
+                metadata={
+                    "managed_by": "openstack-self-service",
+                    "restored_from_snapshot_id": snapshot_id,
+                    "restored_from_server_id": server_id,
+                    "owner": actor,
+                    "owner_role": role,
+                },
+            )
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_restore_completed",
+                resource_type="server",
+                resource_id=restored_server.get("id"),
+                request_id=None,
+                status="accepted",
+                message="Snapshot restore creates a new VM from the selected snapshot.",
+            )
+            return {
+                "id": snapshot_id,
+                "action": "restore",
+                "status": "accepted",
+                "message": "Snapshot restore creates a new VM from the selected snapshot.",
+                "server": restored_server,
+            }
+        except OpenStackServiceError:
+            raise
+        except SDKException as exc:
+            logger.exception(
+                "Failed to restore snapshot id='%s' for server id='%s'",
+                snapshot_id,
+                server_id,
+            )
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
+
     def create_floating_ip(self, public_network_id: str | None = None) -> dict[str, Any]:
         try:
             connection = self.get_connection()
@@ -1158,7 +1506,7 @@ class OpenStackService:
             return None
 
         if isinstance(resource, dict):
-            return resource.get("id")
+            return resource.get("id") or resource.get("image_id") or resource.get("imageId")
 
         return getattr(resource, "id", None)
 
@@ -1251,6 +1599,150 @@ class OpenStackService:
             "router_id": getattr(floating_ip, "router_id", None),
             "project_id": getattr(floating_ip, "project_id", None),
         }
+
+    @staticmethod
+    def _serialize_snapshot(snapshot: Any) -> dict[str, Any]:
+        metadata = OpenStackService._extract_metadata(snapshot)
+        return {
+            "id": snapshot.id,
+            "name": getattr(snapshot, "name", None),
+            "status": getattr(snapshot, "status", None),
+            "created_at": OpenStackService._serialize_value(getattr(snapshot, "created_at", None)),
+            "size": getattr(snapshot, "size", None),
+            "disk_format": getattr(snapshot, "disk_format", None),
+            "visibility": getattr(snapshot, "visibility", None),
+            "server_id": OpenStackService._extract_snapshot_server_id(snapshot),
+            "description": metadata.get("description") or getattr(snapshot, "description", None),
+            "metadata": metadata,
+        }
+
+    @staticmethod
+    def _snapshot_belongs_to_server(snapshot: Any, server_id: str) -> bool:
+        return OpenStackService._extract_snapshot_server_id(snapshot) == server_id
+
+    @staticmethod
+    def _extract_snapshot_server_id(snapshot: Any) -> str | None:
+        metadata = OpenStackService._extract_metadata(snapshot)
+        image_location = metadata.get("image_location")
+        return (
+            metadata.get("cms_snapshot_server_id")
+            or metadata.get("instance_uuid")
+            or metadata.get("server_id")
+            or (image_location.removeprefix("snapshot/") if isinstance(image_location, str) else None)
+        )
+
+    @staticmethod
+    def _extract_metadata(resource: Any) -> dict[str, Any]:
+        metadata = getattr(resource, "metadata", None)
+        if isinstance(metadata, dict):
+            return metadata
+
+        properties = getattr(resource, "properties", None)
+        if isinstance(properties, dict):
+            return properties
+
+        if isinstance(resource, dict):
+            for key in ("metadata", "properties"):
+                value = resource.get(key)
+                if isinstance(value, dict):
+                    return value
+
+        return {}
+
+    @staticmethod
+    def _extract_primary_server_network_id(connection: Connection, server: Any) -> str | None:
+        try:
+            for interface in connection.compute.server_interfaces(server):
+                network_id = getattr(interface, "net_id", None) or getattr(interface, "network_id", None)
+                if network_id:
+                    return network_id
+        except SDKException:
+            logger.warning("Failed to resolve server network from interfaces", exc_info=True)
+
+        return None
+
+    @staticmethod
+    def _extract_console_url(console: Any) -> str | None:
+        if not console:
+            return None
+
+        if isinstance(console, dict):
+            console_payload = console.get("remote_console") or console.get("console") or console
+            if isinstance(console_payload, dict):
+                return console_payload.get("url")
+            return None
+
+        url = getattr(console, "url", None)
+        if url:
+            return url
+
+        remote_console = getattr(console, "remote_console", None)
+        if isinstance(remote_console, dict):
+            return remote_console.get("url")
+
+        nested_console = getattr(console, "console", None)
+        if isinstance(nested_console, dict):
+            return nested_console.get("url")
+
+        return None
+
+    @staticmethod
+    def _extract_server_ips(addresses: Any) -> tuple[str | None, str | None]:
+        if not isinstance(addresses, dict):
+            return None, None
+
+        flattened: list[Any] = []
+        for value in addresses.values():
+            if isinstance(value, list):
+                flattened.extend(value)
+            else:
+                flattened.append(value)
+
+        private_ip: str | None = None
+        floating_ip: str | None = None
+        for item in flattened:
+            if isinstance(item, dict):
+                address = item.get("addr")
+                ip_type = item.get("OS-EXT-IPS:type")
+            else:
+                address = str(item) if item else None
+                ip_type = None
+
+            if not address:
+                continue
+
+            if ip_type == "floating":
+                floating_ip = floating_ip or address
+            elif ip_type == "fixed":
+                private_ip = private_ip or address
+            elif OpenStackService._is_private_ip(address):
+                private_ip = private_ip or address
+            else:
+                floating_ip = floating_ip or address
+
+        return private_ip, floating_ip
+
+    def _suggest_ssh_username(self, server: Any) -> str:
+        metadata = getattr(server, "metadata", None) or {}
+        image_name = str(metadata.get("image_name") or metadata.get("image") or "").lower()
+        image = getattr(server, "image", None)
+        if isinstance(image, dict):
+            image_name = image_name or str(image.get("name") or "").lower()
+        elif image is not None:
+            image_name = image_name or str(getattr(image, "name", "") or "").lower()
+
+        if "cirros" in image_name:
+            return "cirros"
+
+        return self._settings.ssh_default_username
+
+    @staticmethod
+    def _is_private_ip(ip_address: str) -> bool:
+        return (
+            ip_address.startswith("10.")
+            or ip_address.startswith("192.168.")
+            or any(ip_address.startswith(f"172.{index}.") for index in range(16, 32))
+        )
 
     @staticmethod
     def _resolve_public_network(

@@ -119,6 +119,47 @@ class OpenStackServerLifecycleResponse(BaseModel):
     status: str
 
 
+class OpenStackServerConsoleResponse(BaseModel):
+    server_id: str
+    console_type: str
+    console_url: str
+
+
+class OpenStackServerSshConsoleResponse(BaseModel):
+    server_id: str
+    server_name: str | None
+    private_ip: str | None
+    floating_ip: str | None
+    username_suggestion: str
+    connection_status: str
+
+
+class OpenStackCreateSnapshotRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+
+
+class OpenStackSnapshotResponse(BaseModel):
+    id: str
+    name: str | None
+    status: str | None
+    created_at: str | None
+    size: int | None = None
+    disk_format: str | None = None
+    visibility: str | None = None
+    server_id: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class OpenStackSnapshotActionResponse(BaseModel):
+    id: str
+    action: str
+    status: str
+    message: str
+    server: OpenStackCreateServerResponse | None = None
+
+
 class OpenStackRebootServerRequest(BaseModel):
     reboot_type: str = Field(default="SOFT", pattern="^(SOFT|HARD)$")
 

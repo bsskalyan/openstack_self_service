@@ -1,22 +1,27 @@
+import asyncio
 import logging
+import socket
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 
 from app.core.config import get_settings
 from app.core.user_context import (
     UNAUTHORIZED_MESSAGE,
     CurrentUser,
+    VALID_ROLES,
     ensure_role,
     get_current_user,
 )
 from app.providers.openstack.schemas import (
+    OpenStackAuditEvent,
+    OpenStackCreateFloatingIPRequest,
     OpenStackCreateServerRequest,
     OpenStackCreateServerResponse,
-    OpenStackAuditEvent,
+    OpenStackCreateSnapshotRequest,
     OpenStackAttachFloatingIPRequest,
-    OpenStackCreateFloatingIPRequest,
     OpenStackFlavorResponse,
     OpenStackFloatingIPActionResponse,
     OpenStackFloatingIPResponse,
@@ -26,8 +31,12 @@ from app.providers.openstack.schemas import (
     OpenStackRebootServerRequest,
     OpenStackRejectRequest,
     OpenStackSecurityGroupResponse,
+    OpenStackServerConsoleResponse,
     OpenStackServerLifecycleResponse,
     OpenStackServerResponse,
+    OpenStackServerSshConsoleResponse,
+    OpenStackSnapshotActionResponse,
+    OpenStackSnapshotResponse,
     OpenStackStatusResponse,
     OpenStackVMRequest,
     OpenStackVMRequestRecord,
@@ -161,6 +170,162 @@ def is_audit_event_visible_to_user(event: dict[str, Any], user: CurrentUser) -> 
         return is_request_visible_to_user(record, user)
 
     return False
+
+
+async def _bridge_ssh_session(
+    *,
+    websocket: WebSocket,
+    openstack_service: OpenStackService,
+    current_user: CurrentUser,
+    server_id: str,
+    session: dict[str, Any],
+) -> None:
+    settings = get_settings()
+    ssh_key_path = Path(settings.ssh_private_key_path or "")
+    if not settings.ssh_private_key_path or not ssh_key_path.exists():
+        await websocket.send_text(
+            "\r\nCLI console is not configured. Set SSH_PRIVATE_KEY_PATH on the backend.\r\n",
+        )
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
+
+    client: Any = None
+    channel: Any = None
+    reader_task: asyncio.Task[None] | None = None
+    session_opened = False
+
+    try:
+        await websocket.send_text(
+            f"\r\nConnecting to {session['username']}@{session['host']}...\r\n",
+        )
+        client, channel = await asyncio.to_thread(
+            _open_paramiko_shell,
+            host=session["host"],
+            username=session["username"],
+            key_path=str(ssh_key_path),
+            known_hosts_path=settings.ssh_known_hosts_path,
+        )
+        session_opened = True
+        openstack_service.record_console_audit_event(
+            actor=current_user.name,
+            role=current_user.role,
+            action="cli_console_opened",
+            server_id=server_id,
+            status="succeeded",
+            message="CLI console session opened.",
+        )
+        await websocket.send_text("\r\nConnected. Private keys and passwords are never exposed.\r\n\r\n")
+        reader_task = asyncio.create_task(_stream_ssh_output(channel, websocket))
+
+        while True:
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=settings.ssh_session_timeout_seconds,
+                )
+            except TimeoutError:
+                await websocket.send_text("\r\nSession timed out due to inactivity.\r\n")
+                break
+            except WebSocketDisconnect:
+                break
+
+            if channel.closed:
+                break
+            await asyncio.to_thread(channel.send, message)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001 - map SSH library errors to friendly terminal text.
+        logger.exception("SSH console session failed for server id='%s'", server_id)
+        await websocket.send_text(_friendly_ssh_error(exc))
+    finally:
+        if reader_task:
+            reader_task.cancel()
+        if channel is not None:
+            await asyncio.to_thread(channel.close)
+        if client is not None:
+            await asyncio.to_thread(client.close)
+        if session_opened:
+            openstack_service.record_console_audit_event(
+                actor=current_user.name,
+                role=current_user.role,
+                action="cli_console_closed",
+                server_id=server_id,
+                status="succeeded",
+                message="CLI console session closed.",
+            )
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
+
+
+def _open_paramiko_shell(
+    *,
+    host: str,
+    username: str,
+    key_path: str,
+    known_hosts_path: str | None,
+) -> tuple[Any, Any]:
+    try:
+        import paramiko
+    except ImportError as exc:  # pragma: no cover - depends on deployment environment.
+        raise RuntimeError("Paramiko is not installed. Install backend requirements.") from exc
+
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    if known_hosts_path:
+        client.load_host_keys(known_hosts_path)
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    client.connect(
+        hostname=host,
+        port=22,
+        username=username,
+        key_filename=key_path,
+        timeout=12,
+        banner_timeout=12,
+        auth_timeout=12,
+        look_for_keys=False,
+        allow_agent=False,
+    )
+    channel = client.invoke_shell(term="xterm-256color", width=120, height=32)
+    channel.settimeout(0.2)
+    return client, channel
+
+
+async def _stream_ssh_output(channel: Any, websocket: WebSocket) -> None:
+    while not channel.closed:
+        try:
+            data = await asyncio.to_thread(channel.recv, 4096)
+        except (TimeoutError, socket.timeout):
+            continue
+        except Exception:
+            break
+
+        if not data:
+            break
+        await websocket.send_text(data.decode("utf-8", errors="replace"))
+
+
+def _terminal_error_message(exc: OpenStackServiceError) -> str:
+    detail = exc.failure_details or {}
+    message = detail.get("user_message") or str(exc)
+    suggestion = detail.get("suggested_action")
+    return f"\r\n{message}\r\n{suggestion or ''}\r\n"
+
+
+def _friendly_ssh_error(exc: Exception) -> str:
+    error_text = str(exc).lower()
+    if "paramiko is not installed" in error_text:
+        return "\r\nCLI console backend is missing Paramiko. Install backend requirements.\r\n"
+    if "authentication failed" in error_text or "not a valid" in error_text:
+        return "\r\nAuthentication failed. Verify SSH_PRIVATE_KEY_PATH and VM keypair.\r\n"
+    if "server not found in known_hosts" in error_text or "not found in known_hosts" in error_text:
+        return "\r\nSSH host key is not trusted. Add the VM host key to SSH_KNOWN_HOSTS_PATH.\r\n"
+    if "unable to connect" in error_text or "timed out" in error_text or "timeout" in error_text:
+        return "\r\nSSH port unavailable. Verify security group rules and VM reachability.\r\n"
+    if "no existing session" in error_text:
+        return "\r\nSSH session could not be opened on the VM.\r\n"
+    return "\r\nCLI console connection failed. Verify VM SSH reachability and key configuration.\r\n"
 
 
 @router.get(
@@ -475,6 +640,173 @@ async def create_server(
         )
     except OpenStackServiceError as exc:
         raise handle_openstack_error("OpenStack server creation", exc) from exc
+
+
+@router.get(
+    "/servers/{server_id}/console",
+    response_model=OpenStackServerConsoleResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_server_console(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    ensure_role(current_user, WRITE_ROLES)
+    assert_server_manage_allowed(server_id, current_user, openstack_service)
+    try:
+        return openstack_service.get_server_console(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack server console", exc) from exc
+
+
+@router.get(
+    "/servers/{server_id}/ssh-console",
+    response_model=OpenStackServerSshConsoleResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_server_ssh_console(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    ensure_role(current_user, WRITE_ROLES)
+    assert_server_manage_allowed(server_id, current_user, openstack_service)
+    try:
+        return openstack_service.get_server_ssh_console_metadata(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack SSH console metadata", exc) from exc
+
+
+@router.get(
+    "/servers/{server_id}/snapshots",
+    response_model=list[OpenStackSnapshotResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_server_snapshots(
+    server_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+) -> list[dict[str, Any]]:
+    try:
+        return openstack_service.list_server_snapshots(server_id)
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack snapshot listing", exc) from exc
+
+
+@router.post(
+    "/servers/{server_id}/snapshots",
+    response_model=OpenStackSnapshotResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_server_snapshot(
+    server_id: str,
+    request: OpenStackCreateSnapshotRequest,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    ensure_role(current_user, WRITE_ROLES)
+    assert_server_manage_allowed(server_id, current_user, openstack_service)
+    try:
+        return openstack_service.create_server_snapshot(
+            server_id,
+            name=request.name,
+            description=request.description,
+            actor=current_user.name,
+            role=current_user.role,
+        )
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack snapshot creation", exc) from exc
+
+
+@router.delete(
+    "/snapshots/{snapshot_id}",
+    response_model=OpenStackSnapshotActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def delete_snapshot(
+    snapshot_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    ensure_role(current_user, WRITE_ROLES)
+    try:
+        snapshot_server_id = openstack_service.get_snapshot_server_id(snapshot_id)
+        if snapshot_server_id:
+            assert_server_manage_allowed(snapshot_server_id, current_user, openstack_service)
+        elif not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=UNAUTHORIZED_MESSAGE,
+            )
+        return openstack_service.delete_snapshot(
+            snapshot_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack snapshot deletion", exc) from exc
+
+
+@router.post(
+    "/servers/{server_id}/restore-snapshot/{snapshot_id}",
+    response_model=OpenStackSnapshotActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def restore_server_snapshot(
+    server_id: str,
+    snapshot_id: str,
+    openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    ensure_role(current_user, WRITE_ROLES)
+    assert_server_manage_allowed(server_id, current_user, openstack_service)
+    try:
+        return openstack_service.restore_server_snapshot(
+            server_id,
+            snapshot_id,
+            actor=current_user.name,
+            role=current_user.role,
+        )
+    except OpenStackServiceError as exc:
+        raise handle_openstack_error("OpenStack snapshot restore", exc) from exc
+
+
+@router.websocket("/servers/{server_id}/ssh/ws")
+async def open_server_ssh_websocket(
+    websocket: WebSocket,
+    server_id: str,
+    user_name: Annotated[str | None, Query(alias="user")] = None,
+    user_role: Annotated[str | None, Query(alias="role")] = None,
+) -> None:
+    role = (user_role or "viewer").strip().lower()
+    if role not in VALID_ROLES:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    current_user = CurrentUser(name=(user_name or "viewer").strip() or "viewer", role=role)  # type: ignore[arg-type]
+    openstack_service = get_openstack_service()
+
+    try:
+        ensure_role(current_user, WRITE_ROLES)
+        assert_server_manage_allowed(server_id, current_user, openstack_service)
+        session = openstack_service.prepare_ssh_console_session(server_id)
+    except HTTPException:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    except OpenStackServiceError as exc:
+        await websocket.accept()
+        await websocket.send_text(_terminal_error_message(exc))
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
+
+    await websocket.accept()
+    await _bridge_ssh_session(
+        websocket=websocket,
+        openstack_service=openstack_service,
+        current_user=current_user,
+        server_id=server_id,
+        session=session,
+    )
 
 
 @router.delete(
