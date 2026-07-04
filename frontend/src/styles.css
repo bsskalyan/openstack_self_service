@@ -145,6 +145,7 @@ button:disabled {
 .theme-dark .cost-breakdown,
 .theme-dark .confirm-dialog,
 .theme-dark .reboot-menu-list,
+.theme-dark .radio-card,
 .theme-dark .package-checkbox,
 .theme-dark .toast {
   background: #111827;
@@ -1287,6 +1288,41 @@ td small {
   display: grid;
   gap: 14px;
   max-width: 520px;
+}
+
+.restore-modal {
+  max-width: 620px;
+}
+
+.radio-card {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+
+.radio-card input {
+  margin-top: 3px;
+  min-height: auto;
+  width: auto;
+}
+
+.radio-card span {
+  display: grid;
+  gap: 4px;
+}
+
+.radio-card small {
+  color: #65738a;
+  font-weight: 600;
+}
+
+.restore-warning {
+  display: grid;
+  gap: 10px;
 }
 
 .snapshot-management-modal {

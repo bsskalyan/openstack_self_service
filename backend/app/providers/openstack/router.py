@@ -30,6 +30,7 @@ from app.providers.openstack.schemas import (
     OpenStackNetworkResponse,
     OpenStackRebootServerRequest,
     OpenStackRejectRequest,
+    OpenStackRestoreSnapshotRequest,
     OpenStackSecurityGroupResponse,
     OpenStackServerConsoleResponse,
     OpenStackServerLifecycleResponse,
@@ -757,13 +758,17 @@ async def restore_server_snapshot(
     snapshot_id: str,
     openstack_service: Annotated[OpenStackService, Depends(get_openstack_service)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    request: OpenStackRestoreSnapshotRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     ensure_role(current_user, WRITE_ROLES)
     assert_server_manage_allowed(server_id, current_user, openstack_service)
     try:
+        restore_request = request or OpenStackRestoreSnapshotRequest()
         return openstack_service.restore_server_snapshot(
             server_id,
             snapshot_id,
+            mode=restore_request.mode,
+            new_vm_name=restore_request.new_vm_name,
             actor=current_user.name,
             role=current_user.role,
         )

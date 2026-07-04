@@ -124,9 +124,10 @@ export const api = {
     }),
   deleteSnapshot: (snapshotId) =>
     request(`/openstack/snapshots/${snapshotId}`, { method: "DELETE" }),
-  restoreSnapshot: (serverId, snapshotId) =>
+  restoreSnapshot: (serverId, snapshotId, payload) =>
     request(`/openstack/servers/${serverId}/restore-snapshot/${snapshotId}`, {
       method: "POST",
+      body: JSON.stringify(payload ?? { mode: "new_vm" }),
     }),
   deleteServer: (serverId) =>
     request(`/openstack/servers/${serverId}`, { method: "DELETE" }),

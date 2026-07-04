@@ -1876,6 +1876,7 @@ function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [restoreSnapshot, setRestoreSnapshot] = useState(null);
   const [pendingSnapshot, setPendingSnapshot] = useState("");
 
   async function loadSnapshots() {
@@ -1914,6 +1915,14 @@ function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast
       api.createServerSnapshot(server.id, payload),
     );
     setCreateOpen(false);
+  }
+
+  async function restoreSelectedSnapshot(snapshot, payload) {
+    setPendingSnapshot("restore");
+    await runSnapshotAction("Restore snapshot", () =>
+      api.restoreSnapshot(server.id, snapshot.id, payload),
+    );
+    setRestoreSnapshot(null);
   }
 
   return (
@@ -1972,7 +1981,7 @@ function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast
                     <div className="button-row snapshot-actions">
                       <button
                         disabled={!canManage}
-                        onClick={() => setConfirmAction({ type: "restore", snapshot })}
+                        onClick={() => setRestoreSnapshot(snapshot)}
                         type="button"
                       >
                         Restore
@@ -2014,7 +2023,7 @@ function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast
         </button>
         <button
           disabled={!canManage || snapshots.length === 0}
-          onClick={() => setConfirmAction({ type: "restore", snapshot: snapshots[0] })}
+          onClick={() => setRestoreSnapshot(snapshots[0])}
           type="button"
         >
           Restore Snapshot
@@ -2036,27 +2045,26 @@ function SnapshotManagement({ canManage, currentUser, onAction, onError, onToast
       {confirmAction && (
         <ConfirmDialog
           busy={pendingSnapshot === confirmAction.type}
-          confirmLabel={confirmAction.type === "delete" ? "Delete" : "Restore"}
-          danger={confirmAction.type === "delete"}
-          description={
-            confirmAction.type === "delete"
-              ? `Delete snapshot "${confirmAction.snapshot.name || confirmAction.snapshot.id}"? This action cannot be undone.`
-              : `Restore snapshot "${confirmAction.snapshot.name || confirmAction.snapshot.id}"? Snapshot restore creates a new VM from the selected snapshot.`
-          }
+          confirmLabel="Delete"
+          danger
+          description={`Delete snapshot "${confirmAction.snapshot.name || confirmAction.snapshot.id}"? This action cannot be undone.`}
           onCancel={() => setConfirmAction(null)}
           onConfirm={() => {
             setPendingSnapshot(confirmAction.type);
-            if (confirmAction.type === "delete") {
-              runSnapshotAction("Delete snapshot", () =>
-                api.deleteSnapshot(confirmAction.snapshot.id),
-              );
-              return;
-            }
-            runSnapshotAction("Restore snapshot", () =>
-              api.restoreSnapshot(server.id, confirmAction.snapshot.id),
+            runSnapshotAction("Delete snapshot", () =>
+              api.deleteSnapshot(confirmAction.snapshot.id),
             );
           }}
-          title={confirmAction.type === "delete" ? "Delete snapshot" : "Restore snapshot"}
+          title="Delete snapshot"
+        />
+      )}
+      {restoreSnapshot && (
+        <RestoreSnapshotModal
+          busy={pendingSnapshot === "restore"}
+          server={server}
+          snapshot={restoreSnapshot}
+          onCancel={() => setRestoreSnapshot(null)}
+          onSubmit={(payload) => restoreSelectedSnapshot(restoreSnapshot, payload)}
         />
       )}
     </section>
@@ -2106,6 +2114,109 @@ function CreateSnapshotModal({ busy, onCancel, onSubmit }) {
           </button>
           <button className="primary" disabled={busy || !form.name.trim()} type="submit">
             {busy ? "Creating..." : "Create Snapshot"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RestoreSnapshotModal({ busy, onCancel, onSubmit, server, snapshot }) {
+  const defaultName = `${server.name || "server"}-restored`;
+  const [mode, setMode] = useState("new_vm");
+  const [newVmName, setNewVmName] = useState(defaultName);
+  const [confirmationText, setConfirmationText] = useState("");
+  const sameVmConfirmed = confirmationText.trim() === "RESTORE";
+  const canSubmit = mode === "new_vm" ? Boolean(newVmName.trim()) : sameVmConfirmed;
+
+  function submit(event) {
+    event.preventDefault();
+    if (!canSubmit) {
+      return;
+    }
+
+    onSubmit({
+      mode,
+      new_vm_name: mode === "new_vm" ? newVmName.trim() : null,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form
+        aria-modal="true"
+        className="confirm-dialog snapshot-modal restore-modal"
+        onSubmit={submit}
+        role="dialog"
+      >
+        <div>
+          <p className="eyebrow">Restore Options</p>
+          <h3>Restore snapshot</h3>
+          <p>{snapshot.name || snapshot.id}</p>
+        </div>
+
+        <label className="radio-card">
+          <input
+            checked={mode === "new_vm"}
+            name="restore_mode"
+            onChange={() => setMode("new_vm")}
+            type="radio"
+            value="new_vm"
+          />
+          <span>
+            <strong>Restore as New VM</strong>
+            <small>Recommended. Keeps the original VM unchanged.</small>
+          </span>
+        </label>
+
+        {mode === "new_vm" && (
+          <label>
+            New VM name
+            <input
+              onChange={(event) => setNewVmName(event.target.value)}
+              required
+              value={newVmName}
+            />
+          </label>
+        )}
+
+        <label className="radio-card">
+          <input
+            checked={mode === "same_vm"}
+            name="restore_mode"
+            onChange={() => setMode("same_vm")}
+            type="radio"
+            value="same_vm"
+          />
+          <span>
+            <strong>Restore Existing VM</strong>
+            <small>Rebuilds the selected VM from this snapshot.</small>
+          </span>
+        </label>
+
+        {mode === "same_vm" && (
+          <div className="alert warning restore-warning">
+            <strong>Destructive restore warning</strong>
+            <p>
+              This will rebuild the existing VM from the selected snapshot. Current root disk state
+              may be lost. Continue?
+            </p>
+            <label>
+              Type RESTORE to continue
+              <input
+                onChange={(event) => setConfirmationText(event.target.value)}
+                value={confirmationText}
+              />
+            </label>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button disabled={busy} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary" disabled={busy || !canSubmit} type="submit">
+            {busy ? "Restoring..." : "Restore Snapshot"}
           </button>
         </div>
       </form>

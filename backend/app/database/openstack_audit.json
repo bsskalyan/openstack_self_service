@@ -190,5 +190,29 @@
     "request_id": null,
     "status": "accepted",
     "message": "Snapshot 'test' created for server '365c2962-4386-4f86-943b-e7f0fbc36af4'."
+  },
+  {
+    "id": "9e953fe9-ad1d-47e7-b034-ed99cd07446a",
+    "timestamp": "2026-07-04T12:25:38.762159+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "snapshot_restore_requested",
+    "resource_type": "snapshot",
+    "resource_id": "ac41cb0d-1e14-41fd-9a8b-876ae93279c0",
+    "request_id": null,
+    "status": "accepted",
+    "message": "Snapshot restore requested. A new VM will be created from the snapshot."
+  },
+  {
+    "id": "c106392f-e580-4eb3-b826-31435fcf11a0",
+    "timestamp": "2026-07-04T12:25:39.461055+00:00",
+    "actor": "Asha Engineer",
+    "role": "engineer",
+    "action": "snapshot_restore_completed",
+    "resource_type": "server",
+    "resource_id": "f0782f1f-de06-4700-b58b-ef7f912b7432",
+    "request_id": null,
+    "status": "accepted",
+    "message": "Snapshot restore creates a new VM from the selected snapshot."
   }
 ]

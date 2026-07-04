@@ -454,6 +454,8 @@ class OpenStackService:
         server_id: str,
         snapshot_id: str,
         *,
+        mode: str = "new_vm",
+        new_vm_name: str | None = None,
         actor: str,
         role: str,
     ) -> dict[str, Any]:
@@ -477,6 +479,26 @@ class OpenStackService:
                             "snapshot_server_id": snapshot_server_id,
                         },
                     },
+                )
+
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_restore_mode_selected",
+                resource_type="snapshot",
+                resource_id=snapshot_id,
+                request_id=None,
+                status="accepted",
+                message=f"Snapshot restore mode selected: {mode}.",
+            )
+
+            if mode == "same_vm":
+                return self._restore_snapshot_to_same_vm(
+                    connection=connection,
+                    original_server=original_server,
+                    snapshot_id=snapshot_id,
+                    actor=actor,
+                    role=role,
                 )
 
             flavor_id = self._extract_server_flavor_id(original_server)
@@ -504,10 +526,10 @@ class OpenStackService:
                 resource_id=snapshot_id,
                 request_id=None,
                 status="accepted",
-                message="Snapshot restore requested. A new VM will be created from the snapshot.",
+                message="Snapshot restore requested with mode 'new_vm'.",
             )
             restored_server = self.create_server(
-                name=f"{getattr(original_server, 'name', 'server')}-restored",
+                name=new_vm_name or f"{getattr(original_server, 'name', 'server')}-restored",
                 image_id=snapshot_id,
                 flavor_id=flavor_id,
                 network_id=network_id,
@@ -523,7 +545,7 @@ class OpenStackService:
             self._record_audit_event(
                 actor=actor,
                 role=role,
-                action="snapshot_restore_completed",
+                action="snapshot_restore_new_vm_completed",
                 resource_type="server",
                 resource_id=restored_server.get("id"),
                 request_id=None,
@@ -549,6 +571,85 @@ class OpenStackService:
             raise OpenStackServiceError(
                 failure_details["user_message"],
                 failure_details=failure_details,
+            ) from exc
+
+    def _restore_snapshot_to_same_vm(
+        self,
+        *,
+        connection: Connection,
+        original_server: Any,
+        snapshot_id: str,
+        actor: str,
+        role: str,
+    ) -> dict[str, Any]:
+        server_id = getattr(original_server, "id", None)
+        self._record_audit_event(
+            actor=actor,
+            role=role,
+            action="snapshot_restore_existing_vm_attempted",
+            resource_type="server",
+            resource_id=server_id,
+            request_id=None,
+            status="accepted",
+            message="Snapshot restore to existing VM attempted.",
+        )
+        try:
+            rebuilt_server = connection.compute.rebuild_server(
+                original_server,
+                image=snapshot_id,
+                name=getattr(original_server, "name", None),
+            )
+            serialized_server = self._serialize_server_summary(rebuilt_server)
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_restore_existing_vm_succeeded",
+                resource_type="server",
+                resource_id=server_id,
+                request_id=None,
+                status="accepted",
+                message="Existing VM rebuild from snapshot was accepted.",
+            )
+            return {
+                "id": snapshot_id,
+                "action": "restore",
+                "status": "accepted",
+                "message": "Existing VM rebuild from snapshot was accepted.",
+                "server": serialized_server,
+            }
+        except (AttributeError, TypeError, SDKException) as exc:
+            logger.exception(
+                "Failed to restore snapshot id='%s' to existing server id='%s'",
+                snapshot_id,
+                server_id,
+            )
+            self._record_audit_event(
+                actor=actor,
+                role=role,
+                action="snapshot_restore_existing_vm_failed",
+                resource_type="server",
+                resource_id=server_id,
+                request_id=None,
+                status="failed",
+                message="Restore to same VM failed or is unsupported.",
+            )
+            raise OpenStackValidationError(
+                "Restore to same VM is not supported in this OpenStack environment. Please restore as a new VM.",
+                failure_details={
+                    "user_message": (
+                        "Restore to same VM is not supported in this OpenStack environment. "
+                        "Please restore as a new VM."
+                    ),
+                    "technical_reason": self._format_openstack_error(exc)
+                    if isinstance(exc, SDKException)
+                    else str(exc),
+                    "suggested_action": "Choose Restore as New VM and try again.",
+                    "raw_error": {
+                        "server_id": server_id,
+                        "snapshot_id": snapshot_id,
+                        "mode": "same_vm",
+                    },
+                },
             ) from exc
 
     def create_floating_ip(self, public_network_id: str | None = None) -> dict[str, Any]:

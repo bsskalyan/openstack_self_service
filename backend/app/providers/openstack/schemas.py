@@ -152,6 +152,11 @@ class OpenStackSnapshotResponse(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class OpenStackRestoreSnapshotRequest(BaseModel):
+    mode: Literal["new_vm", "same_vm"] = "new_vm"
+    new_vm_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
 class OpenStackSnapshotActionResponse(BaseModel):
     id: str
     action: str
