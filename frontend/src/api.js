@@ -69,6 +69,17 @@ async function request(path, options = {}) {
 
 export const api = {
   listProviders: () => request("/providers"),
+  getOpenStackProviderConfig: () => request("/providers/openstack/config"),
+  saveOpenStackProviderConfig: (payload) =>
+    request("/providers/openstack/config", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  testOpenStackProviderConfig: (payload) =>
+    request("/providers/openstack/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   listCatalogServices: () => request("/catalog/services"),
   getStatus: () => request("/openstack/status"),
   listServers: () => request("/openstack/servers"),

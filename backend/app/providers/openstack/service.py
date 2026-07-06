@@ -9,6 +9,7 @@ from openstack.exceptions import SDKException
 
 from app.core.config import Settings
 from app.providers.openstack.audit_store import OpenStackAuditStore
+from app.providers.openstack.config_store import OpenStackProviderConfigStore
 from app.providers.openstack.policy import evaluate_vm_request
 from app.providers.openstack.request_store import OpenStackRequestStore
 from app.providers.openstack.schemas import OpenStackRejectRequest, OpenStackVMRequest
@@ -48,12 +49,83 @@ class OpenStackService:
         self._connection: Connection | None = None
         self._request_store = OpenStackRequestStore()
         self._audit_store = OpenStackAuditStore()
+        self._config_store = OpenStackProviderConfigStore()
 
     def get_connection(self) -> Connection:
         if self._connection is None:
             self._connection = self._create_connection()
 
         return self._connection
+
+    def reset_connection(self) -> None:
+        self._connection = None
+
+    def get_provider_config(self) -> dict[str, Any]:
+        config = self._get_effective_connection_config()
+        stored = self._config_store.get_config()
+        return {
+            "provider_name": stored.get("provider_name") or "OpenStack",
+            "auth_url": config.get("auth_url"),
+            "username": config.get("username"),
+            "project": config.get("project_name"),
+            "user_domain": config.get("user_domain_id") or "default",
+            "project_domain": config.get("project_domain_id") or "default",
+            "region": config.get("region_name"),
+            "password_configured": bool(config.get("password")),
+            "status": "configured" if self._has_required_connection_config(config) else "incomplete",
+        }
+
+    def save_provider_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        current = self._config_store.get_config()
+        password = config.get("password") if config.get("password") else current.get("password")
+        saved = {
+            "provider_name": config.get("provider_name") or current.get("provider_name") or "OpenStack",
+            "auth_url": config.get("auth_url"),
+            "username": config.get("username"),
+            "password": password,
+            "project": config.get("project"),
+            "user_domain": config.get("user_domain") or "default",
+            "project_domain": config.get("project_domain") or "default",
+            "region": config.get("region"),
+        }
+        self._config_store.save_config(saved)
+        self.reset_connection()
+        return self.get_provider_config()
+
+    def test_provider_config(self, config: dict[str, Any] | None = None) -> dict[str, Any]:
+        if config:
+            stored = self._config_store.get_config()
+            merged_config = {**stored, **config}
+            if not config.get("password") and stored.get("password"):
+                merged_config["password"] = stored["password"]
+            connection_config = self._build_connection_config_from_provider_config(merged_config)
+        else:
+            connection_config = self._get_effective_connection_config()
+        self._validate_connection_config(connection_config)
+        try:
+            connection = self._create_connection_from_config(connection_config)
+            token = connection.authorize()
+            project_name = connection_config.get("project_name")
+            project = connection.get_project(project_name) if project_name else None
+            return {
+                "status": "connected",
+                "message": "OpenStack connection test succeeded.",
+                "cloud": {
+                    "auth_url": connection_config.get("auth_url"),
+                    "region": connection_config.get("region_name"),
+                    "project_id": getattr(project, "id", None),
+                    "project_name": getattr(project, "name", project_name),
+                    "user_name": connection_config.get("username"),
+                    "token_expires_at": getattr(token, "expires_at", None),
+                },
+            }
+        except SDKException as exc:
+            logger.exception("OpenStack provider connection test failed")
+            failure_details = self._build_failure_details(exc)
+            raise OpenStackServiceError(
+                failure_details["user_message"],
+                failure_details=failure_details,
+            ) from exc
 
     def verify_authentication(self) -> dict[str, Any]:
         connection = self.get_connection()
@@ -1339,27 +1411,16 @@ class OpenStackService:
             ) from exc
 
     def _create_connection(self) -> Connection:
-        self._validate_configuration()
+        config = self._get_effective_connection_config()
+        self._validate_connection_config(config)
 
         try:
-            connection = openstack.connection.Connection(
-                auth_url=self._settings.os_auth_url,
-                username=self._settings.os_username,
-                password=self._settings.os_password.get_secret_value()
-                if self._settings.os_password
-                else None,
-                project_name=self._settings.os_project_name,
-                user_domain_id=self._settings.os_user_domain_id,
-                project_domain_id=self._settings.os_project_domain_id,
-                region_name=self._settings.os_region_name,
-                app_name=self._settings.app_name,
-                app_version=self._settings.app_version,
-            )
+            connection = self._create_connection_from_config(config)
             logger.info(
                 "Created OpenStack connection for auth_url='%s', project='%s', region='%s'",
-                self._settings.os_auth_url,
-                self._settings.os_project_name,
-                self._settings.os_region_name,
+                config.get("auth_url"),
+                config.get("project_name"),
+                config.get("region_name"),
             )
             return connection
         except SDKException as exc:
@@ -1370,14 +1431,59 @@ class OpenStackService:
                 failure_details=failure_details,
             ) from exc
 
+    def _get_effective_connection_config(self) -> dict[str, Any]:
+        stored = self._config_store.get_config()
+        return self._build_connection_config_from_provider_config(stored)
+
+    def _build_connection_config_from_provider_config(self, config: dict[str, Any] | None) -> dict[str, Any]:
+        config = config or {}
+        return {
+            "auth_url": config.get("auth_url") or self._settings.os_auth_url,
+            "username": config.get("username") or self._settings.os_username,
+            "password": config.get("password")
+            or (
+                self._settings.os_password.get_secret_value()
+                if self._settings.os_password
+                else None
+            ),
+            "project_name": config.get("project") or self._settings.os_project_name,
+            "user_domain_id": config.get("user_domain") or self._settings.os_user_domain_id,
+            "project_domain_id": config.get("project_domain")
+            or self._settings.os_project_domain_id,
+            "region_name": config.get("region") or self._settings.os_region_name,
+        }
+
+    def _create_connection_from_config(self, config: dict[str, Any]) -> Connection:
+        return openstack.connection.Connection(
+            auth_url=config.get("auth_url"),
+            username=config.get("username"),
+            password=config.get("password"),
+            project_name=config.get("project_name"),
+            user_domain_id=config.get("user_domain_id"),
+            project_domain_id=config.get("project_domain_id"),
+            region_name=config.get("region_name"),
+            app_name=self._settings.app_name,
+            app_version=self._settings.app_version,
+        )
+
+    @staticmethod
+    def _has_required_connection_config(config: dict[str, Any]) -> bool:
+        return all(
+            config.get(name)
+            for name in ("auth_url", "username", "password", "project_name")
+        )
+
     def _validate_configuration(self) -> None:
+        self._validate_connection_config(self._get_effective_connection_config())
+
+    def _validate_connection_config(self, config: dict[str, Any]) -> None:
         missing_settings = [
             name
             for name, value in {
-                "OS_AUTH_URL": self._settings.os_auth_url,
-                "OS_USERNAME": self._settings.os_username,
-                "OS_PASSWORD": self._settings.os_password,
-                "OS_PROJECT_NAME": self._settings.os_project_name,
+                "OS_AUTH_URL": config.get("auth_url"),
+                "OS_USERNAME": config.get("username"),
+                "OS_PASSWORD": config.get("password"),
+                "OS_PROJECT_NAME": config.get("project_name"),
             }.items()
             if value is None or value == ""
         ]

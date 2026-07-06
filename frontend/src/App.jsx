@@ -16,6 +16,7 @@ const tabs = [
   { id: "activity", label: "Activity", roles: ["engineer", "admin", "viewer"] },
   { id: "requests", label: "My Requests", roles: ["engineer", "admin"] },
   { id: "admin", label: "Admin", roles: ["admin"] },
+  { id: "providerConfig", label: "Provider Configuration", roles: ["admin"] },
   { id: "servers", label: "Servers", roles: ["engineer", "admin", "viewer"] },
   { id: "create", label: "Create VM", roles: ["engineer", "admin"] },
   { id: "images", label: "Images", roles: ["engineer", "admin", "viewer"] },
@@ -410,6 +411,13 @@ export default function App() {
             onRefresh={refresh}
             onToast={showToast}
             pendingRequests={data.pendingRequests}
+            selectedProvider={selectedProvider}
+          />
+        )}
+        {activeTabAllowed && activeTab === "providerConfig" && (
+          <ProviderConfigurationPage
+            onError={setError}
+            onToast={showToast}
             selectedProvider={selectedProvider}
           />
         )}
@@ -1212,6 +1220,185 @@ function AdminRequestDetailsPanel({
         <p className="request-result-note">Rejected: {request.rejection_reason}</p>
       )}
     </aside>
+  );
+}
+
+function ProviderConfigurationPage({ onError, onToast, selectedProvider }) {
+  const [form, setForm] = useState({
+    provider_name: "OpenStack",
+    auth_url: "",
+    username: "",
+    password: "",
+    project: "",
+    user_domain: "default",
+    project_domain: "default",
+    region: "",
+  });
+  const [status, setStatus] = useState("loading");
+  const [passwordConfigured, setPasswordConfigured] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  async function loadConfig() {
+    setLoading(true);
+    try {
+      const result = await api.getOpenStackProviderConfig();
+      setForm({
+        provider_name: result.provider_name || "OpenStack",
+        auth_url: result.auth_url || "",
+        username: result.username || "",
+        password: "",
+        project: result.project || "",
+        user_domain: result.user_domain || "default",
+        project_domain: result.project_domain || "default",
+        region: result.region || "",
+      });
+      setStatus(result.status || "unknown");
+      setPasswordConfigured(Boolean(result.password_configured));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load provider config.";
+      onError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  function updateField(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function buildPayload() {
+    return {
+      provider_name: form.provider_name,
+      auth_url: form.auth_url || null,
+      username: form.username || null,
+      password: form.password || null,
+      project: form.project || null,
+      user_domain: form.user_domain || "default",
+      project_domain: form.project_domain || "default",
+      region: form.region || null,
+    };
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.testOpenStackProviderConfig(buildPayload());
+      setTestResult(result);
+      setStatus(result.status === "connected" ? "connected" : "failed");
+      onToast(result.message, result.status === "connected" ? "success" : "error");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Connection test failed.";
+      setStatus("failed");
+      setTestResult({ status: "failed", message });
+      onError(message);
+      onToast(message, "error");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function saveConfiguration(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const result = await api.saveOpenStackProviderConfig(buildPayload());
+      setStatus(result.status || "configured");
+      setPasswordConfigured(Boolean(result.password_configured));
+      setForm((current) => ({ ...current, password: "" }));
+      onToast("Provider configuration saved.", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save provider config.";
+      onError(message);
+      onToast(message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="provider-config-page">
+      <div className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Admin</p>
+          <h2>Provider Configuration</h2>
+          <p className="dashboard-copy">
+            Manage the OpenStack connection used by provisioning, discovery, snapshots, and console actions.
+          </p>
+        </div>
+        <div className="hero-actions">
+          <ProviderBadge provider={selectedProvider} />
+          <span className={`status-pill provider-config-status ${status}`}>
+            {loading ? "loading" : status}
+          </span>
+        </div>
+      </div>
+
+      <form className="form-grid provider-config-form" onSubmit={saveConfiguration}>
+        <label>
+          Provider Name
+          <input name="provider_name" onChange={updateField} required value={form.provider_name} />
+        </label>
+        <label>
+          Auth URL
+          <input name="auth_url" onChange={updateField} required value={form.auth_url} />
+        </label>
+        <label>
+          Username
+          <input name="username" onChange={updateField} required value={form.username} />
+        </label>
+        <label>
+          Password
+          <input
+            name="password"
+            onChange={updateField}
+            placeholder={passwordConfigured ? "Saved password configured" : ""}
+            type="password"
+            value={form.password}
+          />
+        </label>
+        <label>
+          Project
+          <input name="project" onChange={updateField} required value={form.project} />
+        </label>
+        <label>
+          User Domain
+          <input name="user_domain" onChange={updateField} value={form.user_domain} />
+        </label>
+        <label>
+          Project Domain
+          <input name="project_domain" onChange={updateField} value={form.project_domain} />
+        </label>
+        <label>
+          Region
+          <input name="region" onChange={updateField} value={form.region} />
+        </label>
+
+        <div className="span-2 button-row provider-config-actions">
+          <button disabled={testing || saving} onClick={testConnection} type="button">
+            {testing ? "Testing..." : "Test Connection"}
+          </button>
+          <button className="primary" disabled={saving || testing} type="submit">
+            {saving ? "Saving..." : "Save Configuration"}
+          </button>
+        </div>
+
+        {testResult && (
+          <div className={`span-2 request-result-note ${testResult.status}`}>
+            <strong>{testResult.status === "connected" ? "Connection successful" : "Connection failed"}</strong>
+            <p>{testResult.message}</p>
+          </div>
+        )}
+      </form>
+    </section>
   );
 }
 
